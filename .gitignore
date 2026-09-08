@@ -1,0 +1,26 @@
+# Личные данные TelegramNewsAI
+credentials.bin
+telegram_session.session
+telegram_session.session-journal
+*.session
+*.session-journal
+selected_channels.json
+settings_free.json
+news.db
+news.db-*
+collector.lock
+
+# Результаты работы
+Дайджесты/
+logs/
+Резервные_копии/
+models/
+
+# Python и временные файлы
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.zip
+
