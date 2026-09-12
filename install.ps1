@@ -1,4 +1,4 @@
-param([switch]$NoShortcut)
+﻿param([switch]$NoShortcut)
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
