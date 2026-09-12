@@ -2,26 +2,30 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, public-readiness-final]
   pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          cache: 'pip'
+          cache: pip
 
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
@@ -31,3 +35,41 @@ jobs:
 
       - name: Verify Telethon import
         run: python -c "import telethon; print('Telethon', telethon.__version__)"
+
+      - name: Run offline regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Ensure local data is not tracked
+        shell: pwsh
+        run: |
+          $pattern = '(^|/)(credentials(?:\.unreadable-[^/]*)?\.bin|[^/]*\.session(?:-journal)?|news\.db(?:-[^/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|/)(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)/'
+          $forbidden = @(git ls-files | Where-Object { $_ -match $pattern })
+          if ($forbidden.Count) {
+            $forbidden | ForEach-Object { Write-Error "Tracked local data: $_" }
+            exit 1
+          }
+
+      - name: Validate Windows installer syntax
+        shell: powershell
+        run: |
+          $text = Get-Content -LiteralPath .\install.ps1 -Raw
+          [void][ScriptBlock]::Create($text)
+
+      - name: Verify launcher checksum and self-test
+        shell: pwsh
+        run: |
+          $expected = ((Get-Content .\Telegram_Digest.exe.sha256 -Raw).Trim() -split '\s+')[0]
+          $actual = (Get-FileHash .\Telegram_Digest.exe -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw 'Telegram_Digest.exe checksum mismatch.' }
+          $process = Start-Process .\Telegram_Digest.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Launcher self-test failed: $($process.ExitCode)" }
+
+      - name: Compile launcher source
+        shell: powershell
+        run: |
+          .\launcher\build_launcher.ps1 -OutputPath "$env:RUNNER_TEMP\Telegram_Digest.exe"
+
+      - name: Build clean release candidate
+        shell: powershell
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
