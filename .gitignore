@@ -1,5 +1,6 @@
 # Личные данные TelegramNewsAI
 credentials.bin
+credentials.unreadable-*.bin
 telegram_session.session
 telegram_session.session-journal
 *.session
@@ -23,4 +24,3 @@ __pycache__/
 *.log
 *.tmp
 *.zip
-
