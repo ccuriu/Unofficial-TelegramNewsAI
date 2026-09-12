@@ -1,4 +1,4 @@
-# Личные данные TelegramNewsAI
+# TelegramNewsAI local and sensitive data
 credentials.bin
 credentials.unreadable-*.bin
 telegram_session.session
@@ -11,16 +11,45 @@ news.db
 news.db-*
 collector.lock
 
-# Результаты работы
+# Generated output and downloaded models
 Дайджесты/
 logs/
 Резервные_копии/
 models/
 
-# Python и временные файлы
+# Python environments, caches and reports
 .venv/
+venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Builds, archives and temporary files
+build/
+dist/
+*.egg-info/
 *.log
 *.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.rej
+*.pid
 *.zip
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
