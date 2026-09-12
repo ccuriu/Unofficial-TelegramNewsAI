@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +115,102 @@ class OfflineRegressionTests(unittest.TestCase):
         result = self.search("архива")
         self.assertEqual(len(result["direct_results"]), 1)
         self.assertIsInstance(self.connection, sqlite3.Connection)
+
+    def test_public_link_uses_username_and_message_id(self):
+        self.assertEqual(
+            collector.public_link("example", 12345),
+            "https://t.me/example/12345",
+        )
+
+    def test_public_link_without_username_is_none(self):
+        self.assertIsNone(collector.public_link(None, 12345))
+
+    def test_normalized_message_export_keeps_telegram_url(self):
+        message = collector.make_message(
+            self.channel,
+            SimpleNamespace(
+                id=12345,
+                message="Сообщение для проверки ссылки",
+                date=self.now,
+            ),
+            self.settings,
+        )
+        self.assertEqual(message["telegram_url"], "https://t.me/test/12345")
+
+    def test_compact_exact_duplicate_keeps_telegram_url(self):
+        text = "Одинаковая публикация с достаточно длинным текстом для проверки."
+        first = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 1,
+            "telegram_url": "https://t.me/channel_a/1",
+            "text": text,
+            "date_utc": collector.iso_utc(self.now),
+            "views": 1,
+        }
+        second = dict(
+            first,
+            channel_id=2,
+            channel="Канал B",
+            message_id=2,
+            telegram_url="https://t.me/channel_b/2",
+            views=2,
+        )
+        kept, exact, near = collector.collapse_duplicates(
+            [first, second], self.settings
+        )
+        self.assertEqual((len(kept), exact, near), (1, 1, 0))
+        self.assertEqual(
+            kept[0]["duplicates"][0]["telegram_url"],
+            "https://t.me/channel_b/2",
+        )
+
+    def test_related_group_member_keeps_telegram_url(self):
+        common_url = "https://example.test/source"
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "telegram_url": "https://t.me/channel_a/10",
+                "canonical_urls": [common_url],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "telegram_url": "https://t.me/channel_b/20",
+                "canonical_urls": [common_url],
+            },
+        ]
+        groups = collector.build_related_groups(messages)
+        self.assertEqual(
+            [item["telegram_url"] for item in groups[0]["message_refs"]],
+            ["https://t.me/channel_a/10", "https://t.me/channel_b/20"],
+        )
+
+    def test_digest_request_uses_telegram_urls_for_sources(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("telegram_url", request)
+        self.assertIn("кликабельной Markdown-ссылкой", request)
+        self.assertIn("1–3 наиболее полезных ссылок", request)
+
+    def test_digest_request_hides_internal_references(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("refs", request)
+        self.assertIn("message_key", request)
+        self.assertIn("Никогда не показывай их пользователю", request)
+
+    def test_topic_search_request_uses_human_sources(self):
+        request = collector.build_search_chatgpt_instruction(
+            "проверочная тема",
+            7,
+            {},
+        )
+        self.assertIn("telegram_url", request)
+        self.assertIn("название канала как текст ссылки", request)
+        self.assertIn("не придумывай", request)
+        self.assertIn("refs", request)
 
 
 if __name__ == "__main__":
