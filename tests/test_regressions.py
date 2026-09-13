@@ -9,6 +9,11 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "telegram_collector_free.py"
+LOCK_PATH = ROOT / "collector.lock"
+LOCK_STATE_BEFORE_IMPORT = (
+    LOCK_PATH.exists(),
+    LOCK_PATH.stat().st_mtime_ns if LOCK_PATH.exists() else None,
+)
 SPEC = importlib.util.spec_from_file_location("telegramnewsai_collector", SOURCE)
 collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
@@ -21,6 +26,13 @@ class OfflineRegressionTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         collector.APP_DIR = self.directory
         collector.DB_FILE = self.directory / "news.db"
+        collector.OUTPUT_DIR = self.directory / "Дайджесты"
+        collector.ARCHIVE_DIR = collector.OUTPUT_DIR / "Архив"
+        collector.RAW_DIR = collector.ARCHIVE_DIR / "Сырые"
+        collector.LOG_DIR = self.directory / "logs"
+        collector.LATEST_FILE = collector.OUTPUT_DIR / "ДАЙДЖЕСТ_ПОСЛЕДНИЙ.json"
+        collector.SEARCH_LATEST_FILE = collector.OUTPUT_DIR / "ПОИСК_ПОСЛЕДНИЙ.json"
+        collector.SEARCH_ARCHIVE_DIR = collector.ARCHIVE_DIR / "Поиск"
         self.connection = collector.open_db()
         self.addCleanup(self.connection.close)
         self.now = collector.utc_now()
@@ -60,7 +72,11 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_import_does_not_run_main(self):
         self.assertTrue(callable(collector.main))
-        self.assertFalse((ROOT / "collector.lock").exists())
+        current_state = (
+            LOCK_PATH.exists(),
+            LOCK_PATH.stat().st_mtime_ns if LOCK_PATH.exists() else None,
+        )
+        self.assertEqual(current_state, LOCK_STATE_BEFORE_IMPORT)
 
     def test_numbers_are_not_near_duplicates(self):
         prefix = "Подробная публикация о результатах проверки. " * 6
@@ -115,6 +131,153 @@ class OfflineRegressionTests(unittest.TestCase):
         result = self.search("архива")
         self.assertEqual(len(result["direct_results"]), 1)
         self.assertIsInstance(self.connection, sqlite3.Connection)
+
+    def test_runs_schema_has_selection_fingerprint(self):
+        columns = collector.table_columns(self.connection, "runs")
+        self.assertIn("selection_fingerprint", columns)
+
+    def test_selection_fingerprint_is_order_independent(self):
+        first = [
+            {"id": 20, "name": "B"},
+            {"id": 10, "name": "A"},
+        ]
+        second = [
+            {"id": 10, "name": "Renamed"},
+            {"id": 20, "name": "Other title"},
+        ]
+        self.assertEqual(
+            collector.selection_fingerprint(first),
+            collector.selection_fingerprint(second),
+        )
+
+    def test_selection_fingerprint_changes_with_channel_set(self):
+        first = [{"id": 10}, {"id": 20}]
+        second = [{"id": 10}, {"id": 30}]
+        self.assertNotEqual(
+            collector.selection_fingerprint(first),
+            collector.selection_fingerprint(second),
+        )
+
+    def test_previous_digest_reference_is_scoped_to_exact_channel_set(self):
+        channels_a = [{"id": 10}, {"id": 20}]
+        channels_b = [{"id": 30}]
+        fingerprint_a = collector.selection_fingerprint(channels_a)
+        fingerprint_b = collector.selection_fingerprint(channels_b)
+
+        rows = [
+            ("2026-09-13T10:00:00+00:00", fingerprint_a),
+            ("2026-09-13T11:00:00+00:00", fingerprint_b),
+            ("2026-09-13T12:00:00+00:00", None),
+        ]
+        for created_utc, fingerprint in rows:
+            self.connection.execute(
+                """
+                INSERT INTO runs (
+                    created_utc, created_local, hours, messages_exported,
+                    successful_channels, failed_channels, latest_file,
+                    selection_fingerprint
+                )
+                VALUES (?, ?, 6, 1, 1, 0, 'digest.json', ?)
+                """,
+                (created_utc, created_utc, fingerprint),
+            )
+        self.connection.commit()
+
+        self.assertEqual(
+            collector.get_previous_digest_reference(self.connection, channels_a),
+            ("2026-09-13T10:00:00+00:00", "news.db:runs"),
+        )
+        self.assertEqual(
+            collector.get_previous_digest_reference(self.connection, channels_b),
+            ("2026-09-13T11:00:00+00:00", "news.db:runs"),
+        )
+        self.assertEqual(
+            collector.get_previous_digest_reference(
+                self.connection,
+                [{"id": 999}],
+            ),
+            (None, None),
+        )
+
+    def test_json_fallback_requires_matching_selection_fingerprint(self):
+        channels = [{"id": 10}, {"id": 20}]
+        fingerprint = collector.selection_fingerprint(channels)
+        collector.ensure_dirs()
+
+        collector.LATEST_FILE.write_text(
+            __import__("json").dumps({
+                "meta": {
+                    "created_utc": "2026-09-13T10:30:00+00:00",
+                    "selection_fingerprint": "wrong",
+                }
+            }),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            collector.get_previous_digest_reference(self.connection, channels),
+            (None, None),
+        )
+
+        collector.LATEST_FILE.write_text(
+            __import__("json").dumps({
+                "meta": {
+                    "created_utc": "2026-09-13T10:30:00+00:00",
+                    "selection_fingerprint": fingerprint,
+                }
+            }),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            collector.get_previous_digest_reference(self.connection, channels),
+            ("2026-09-13T10:30:00+00:00", "ДАЙДЖЕСТ_ПОСЛЕДНИЙ.json"),
+        )
+
+    def test_register_run_and_export_store_same_selection_fingerprint(self):
+        channels = [{"id": 10, "name": "A", "username": "a"}]
+        fingerprint = collector.selection_fingerprint(channels)
+
+        collector.register_run(
+            self.connection,
+            6,
+            0,
+            1,
+            0,
+            channels,
+        )
+        row = self.connection.execute(
+            "SELECT selection_fingerprint FROM runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual(row["selection_fingerprint"], fingerprint)
+
+        sync_stats = {
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 0,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+        result = collector._v4_save_output(
+            [],
+            [],
+            [],
+            0,
+            0,
+            6,
+            channels,
+            sync_stats,
+            None,
+            None,
+            [],
+            self.settings,
+        )
+        payload = __import__("json").loads(result[0].read_text(encoding="utf-8"))
+        self.assertEqual(payload["meta"]["selection_fingerprint"], fingerprint)
+        self.assertFalse(payload["meta"]["comparison_available"])
 
     def test_public_link_uses_username_and_message_id(self):
         self.assertEqual(
@@ -220,32 +383,157 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_request_uses_telegram_urls_for_sources(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("channel_url", request)
         self.assertIn("telegram_url", request)
-        self.assertIn("Markdown-ссылками", request)
-        self.assertIn("1–3 наиболее полезных источников", request)
+        self.assertIn("channel_url", request)
+        self.assertIn("Markdown-ссылкой", request)
+        self.assertIn("При наличии telegram_url", request)
+        self.assertIn("иначе используй channel_url", request)
+        self.assertIn("при отсутствии обеих ссылок", request)
+        self.assertIn("URL не придумывай", request)
+        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", request)
+        self.assertIn("2–3 ключевые ссылки", request)
 
-    def test_digest_request_hides_internal_references(self):
+    def test_user_instructions_have_no_separate_post_link_or_color_markers(self):
+        requests = (
+            collector.EDITORIAL_PRINCIPLES
+            + collector.SOURCE_RULES
+            + collector.DIGEST_REQUEST
+        )
+        for phrase in (
+            "Открыть публикацию",
+            "Открыть пост",
+            "Читать оригинал",
+            "Перейти к сообщению",
+        ):
+            self.assertNotIn(phrase, requests)
+        for marker in ("🔵", "🟢", "🟣", "🟠", "🟡", "🟤", "⚪", "🔴"):
+            self.assertNotIn(marker, requests)
+
+    def test_prompt_has_no_attachment_citation_hacks(self):
+        self.assertFalse(hasattr(collector, "NO_ATTACHMENT_CITATIONS_RULE"))
+        request = collector.DIGEST_REQUEST.lower()
+        self.assertNotIn("file citations", request)
+        self.assertNotIn("source chips", request)
+        self.assertNotIn("citation вложения", request)
+        self.assertNotIn("дайджест_последний", request)
+        self.assertNotIn("поиск_последний", request)
+
+    def test_digest_request_hides_technical_process(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("refs", request)
-        self.assertIn("message_key", request)
-        self.assertIn("Никогда не показывай их пользователю", request)
-        self.assertIn("Никогда не ссылайся на исходный JSON-файл", request)
+        self.assertIn("Служебные поля", request)
+        self.assertIn("в готовом ответе", request)
+        self.assertIn("Не обсуждай файл, JSON, локальную базу", request)
+        self.assertIn("changes_since_previous_digest", request)
+        self.assertIn("related_message_groups", request)
+        self.assertIn("inherits_from_message_key", request)
 
     def test_digest_request_is_topic_neutral_and_automatic(self):
         request = collector.DIGEST_REQUEST.lower()
         for fixed_topic in ("харьков", "украина", "война"):
             self.assertNotIn(fixed_topic, request)
-        self.assertIn("определи характер материала", request)
-        self.assertIn("самостоятельно создай естественные темы", request)
-        self.assertIn("адаптируй стиль анализа", request)
-        self.assertIn("фиксированного набора разделов нет", request)
-        self.assertIn("цветные unicode/emoji-маркеры", request)
+        self.assertIn("тематика заранее неизвестна", request)
+        self.assertIn("без фиксированных рубрик", request)
+        self.assertIn("по фактическому материалу", request)
+        self.assertIn("заголовки делай короткими", request)
+
+    def test_digest_request_limits_editorial_inference(self):
+        request = collector.DIGEST_REQUEST.lower()
+        self.assertIn("различай прямое сообщение", request)
+        self.assertIn("независимое подтверждение", request)
+        self.assertIn("редакционный вывод", request)
+        self.assertIn("не достраивай отсутствующие факты", request)
+        self.assertIn("автора действия, мотив, цель и причинность", request)
+        self.assertIn("перепечатки одного исходного сообщения не считай независимыми подтверждениями", request)
+
+    def test_digest_request_keeps_adaptive_compact_structure(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("«Главное за период»", request)
+        self.assertIn("не ставь перед ним второй абзац с тем же резюме", request)
+        self.assertIn("Однотипные оперативные предупреждения одного сюжета объединяй", request)
+        self.assertIn("changes_since_previous_digest.comparison_available=true", request)
+        self.assertIn("глубину определяй количеством реально новой информации", request)
+        self.assertNotIn("при среднем объёме", request.lower())
+        self.assertNotIn("при большом", request.lower())
+
+    def test_digest_comparison_never_replaces_full_period(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("Основной дайджест всегда строй по всему содержательному материалу", request)
+        self.assertIn("changes_since_previous_digest — только дополнительный слой сравнения", request)
+        self.assertIn("не задаёт временные границы основного дайджеста", request)
+        self.assertIn("не является фильтром отбора", request)
+        self.assertIn("не исключай из основного дайджеста", request)
+
+    def test_digest_hides_internal_coverage_and_comparison_rules(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("Не объясняй читателю внутренние правила охвата и сравнения", request)
+        self.assertIn("молча применяй полный период основного выпуска", request)
+        self.assertIn("не комментируя их в готовом тексте", request)
+        self.assertEqual(request.count("Не объясняй читателю внутренние правила охвата и сравнения"), 1)
+        self.assertIn("всего охваченного материала по date_local", request)
+        self.assertIn("а не только сообщений из блока сравнения", request)
+        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
+        self.assertEqual(request.count("changes_since_previous_digest — только дополнительный слой сравнения"), 1)
+        self.assertEqual(request.count("«Что изменилось» не заменяет основной дайджест"), 1)
+
+    def test_digest_does_not_end_with_subjective_second_summary(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("не добавляй повторный итог, личный выбор или рейтинг", request)
+        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
+        self.assertNotIn("что я бы выделил", request.lower())
+        self.assertNotIn("мой выбор", request.lower())
+
+    def test_digest_title_uses_actual_local_period(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("В заголовке укажи дату", request)
+        self.assertIn("фактический локальный интервал", request)
+        self.assertIn("date_local", request)
+        self.assertIn("если надёжно определить интервал нельзя, не придумывай", request)
+
+    def test_source_rules_cover_independent_and_composite_stories(self):
+        rules = collector.SOURCE_RULES
+        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", rules)
+        self.assertIn("Строка источника должна быть последней строкой сюжета", rules)
+        self.assertIn("покрывать все существенные утверждения", rules)
+        self.assertIn("иначе раздели материал на отдельные сюжеты или пункты", rules)
+        self.assertIn("ставь источник непосредственно после каждого события", rules)
+        self.assertIn("не собирай общий список ссылок в конце блока", rules)
+        self.assertIn("Пункты «Главное за период» могут не дублировать ссылки", rules)
+        self.assertIn("2–3 ключевые ссылки", rules)
+        self.assertEqual(rules.count("Каждый самостоятельный фактический сюжет"), 1)
+        self.assertEqual(rules.count("Строка источника должна быть последней строкой сюжета"), 1)
+        self.assertNotIn("не переходи к следующему заголовку или самостоятельному сюжету", rules)
+        self.assertNotIn("Источник ставь после соответствующего сюжета или пункта", rules)
+
+    def test_digest_isolated_from_user_profile_and_chat_history(self):
+        rules = collector.EDITORIAL_PRINCIPLES
+        self.assertIn("игнорируй сведения о пользователе", rules)
+        self.assertIn("персональную память", rules)
+        self.assertIn("историю текущего и прошлых чатов", rules)
+        self.assertIn("не должны влиять на отбор, порядок, акценты или оценку полезности материала", rules)
+        self.assertIn("Не пиши «для вас», «вам особенно важно»", rules)
+        self.assertEqual(rules.count("игнорируй сведения о пользователе"), 1)
+        self.assertEqual(rules.count("Не пиши «для вас»"), 1)
+
+    def test_editorial_rules_do_not_force_analysis_after_every_story(self):
+        rules = collector.EDITORIAL_PRINCIPLES
+        self.assertIn("если факты самодостаточны", rules)
+        self.assertIn("не дописывай обязательную аналитику", rules)
+        self.assertIn("не ранжируй событие", rules.lower())
+
+    def test_prompt_size_budget(self):
+        self.assertLess(len(collector.EDITORIAL_PRINCIPLES), 3500)
+        self.assertLess(len(collector.SOURCE_RULES), 1200)
+        self.assertLess(len(collector.DIGEST_REQUEST), 6000)
 
     def test_preview_has_no_fixed_topic_classifier(self):
         self.assertNotIn("topicRules", collector.PREVIEW_HTML)
         self.assertNotIn('id="topic"', collector.PREVIEW_HTML)
         self.assertIn("m.channel_url", collector.PREVIEW_HTML)
+
+    def test_preview_uses_one_source_link_with_post_priority(self):
+        preview = collector.PREVIEW_HTML
+        self.assertIn("m.telegram_url||m.channel_url", preview)
+        self.assertNotIn("Открыть публикацию", preview)
 
     def test_legacy_operational_hook_has_no_geographic_bias(self):
         self.assertFalse(collector.is_routine_alert("Короткое сообщение любого содержания"))
@@ -274,15 +562,18 @@ class OfflineRegressionTests(unittest.TestCase):
             7,
             {},
         )
-        self.assertIn("channel_url", request)
         self.assertIn("telegram_url", request)
-        self.assertIn("Открыть публикацию", request)
-        self.assertIn("не придумывай", request)
-        self.assertIn("refs", request)
-        self.assertIn("Не используй фиксированный набор разделов", request)
-        self.assertIn("Никогда не ссылайся на исходный JSON-файл", request)
+        self.assertIn("channel_url", request)
+        self.assertIn("иначе используй channel_url", request)
+        self.assertIn("URL не придумывай", request)
+        self.assertIn("related_message_groups", request)
+        self.assertIn("по этой теме, а не по всей повестке", request)
+        self.assertIn("редакционный вывод", request)
+        self.assertNotIn("Открыть публикацию", request)
+        self.assertNotIn("file citations", request.lower())
+        self.assertNotIn("source chips", request.lower())
+        self.assertLess(len(request), 5500)
 
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
