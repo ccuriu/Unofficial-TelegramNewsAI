@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.3 Stable"
+APP_VERSION = "5.4.4 Stable"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -864,42 +864,7 @@ def normalize(text):
 
 
 def is_routine_alert(text):
-    normalized = normalize(text)
-
-    phrases = [
-        "оголошена повітряна тривога",
-        "відбій тривоги",
-        "відбій повітряної тривоги",
-        "воздушная тревога",
-        "повітряна тривога",
-        "м харків відбій тривоги",
-        "м харків оголошена повітряна тривога",
-    ]
-
-    if (
-        len(normalized) <= 240
-        and any(p in normalized for p in phrases)
-    ):
-        return True
-
-    operational = [
-        "над містом дорозвідка",
-        "на хаз",
-        "зник",
-        "над містом",
-        "дорозвідка",
-    ]
-
-    if (
-        len(normalized) <= 80
-        and any(
-            normalized == p
-            or normalized.startswith(p + " ")
-            for p in operational
-        )
-    ):
-        return True
-
+    """Legacy hook kept for compatibility without topic-specific rules."""
     return False
 
 
@@ -913,9 +878,19 @@ URL_RE = re.compile(
 )
 
 
+def public_channel_link(username):
+    if not isinstance(username, str):
+        return None
+    username = username.strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,32}", username):
+        return None
+    return f"https://t.me/{username}"
+
+
 def public_link(username, message_id):
-    if username and message_id:
-        return f"https://t.me/{username}/{message_id}"
+    channel_url = public_channel_link(username)
+    if channel_url and isinstance(message_id, int) and not isinstance(message_id, bool) and message_id > 0:
+        return f"{channel_url}/{message_id}"
     return None
 
 
@@ -1453,6 +1428,7 @@ def make_message(channel, msg, settings):
         "channel_id": int(channel["id"]),
         "channel": channel["name"],
         "username": username,
+        "channel_url": public_channel_link(username),
 
         "message_id": int(msg.id),
 
@@ -3651,9 +3627,13 @@ def build_related_groups(messages):
                 {
                     "message_key": message_key(m),
                     "channel": m.get("channel"),
+                    "username": m.get("username"),
                     "message_id": m.get(
                         "message_id"
                     ),
+                    "channel_url": m.get(
+                        "channel_url"
+                    ) or public_channel_link(m.get("username")),
                     "telegram_url": m.get(
                         "telegram_url"
                     ),
@@ -3704,9 +3684,15 @@ def split_operational(
 # ============================================================
 
 EDITORIAL_PRINCIPLES = (
-    "Главная задача — подготовить профессиональный информационный обзор, который заменяет пользователю "
-    "просмотр всех выбранных Telegram-каналов за указанный период. Не пересказывай публикации по очереди: "
-    "объединяй сообщения по событиям и сюжетам, выстраивай хронологию, выделяй новые детали, изменения и последствия. "
+    "Главная задача — подготовить профессиональный обзор, который заменяет пользователю просмотр всех выбранных "
+    "Telegram-каналов за указанный период. Тематика заранее неизвестна: сначала определи характер материала только по "
+    "фактическому содержанию выбранных каналов и сообщений, затем самостоятельно выбери структуру, количество и названия "
+    "естественных тем, порядок, глубину и подходящий стиль обработки. Не используй обязательный или заранее заданный набор "
+    "рубрик и не отдавай приоритет какой-либо стране, городу, региону либо категории. Для небольшой подборки не создавай "
+    "искусственные разделы; для большой или смешанной группируй материалы по реально проявившимся смысловым темам. "
+    "Адаптируй редакторский подход к типу материала: объясняй именно те аспекты, которые помогают понять его содержание. "
+    "Не пересказывай публикации по очереди: объединяй связанные сообщения по событиям и сюжетам, учитывай хронологию, "
+    "выделяй новые детали, изменения, ограничения, реакции или последствия, когда они действительно уместны. "
     "Объективность здесь означает честно и полно передать картину, складывающуюся из выбранных каналов, "
     "а не автоматически считать официальные заявления, крупные СМИ или мнение большинства более истинными. "
     "Не превращай заявление любой стороны в установленный факт только из-за статуса источника. "
@@ -3722,18 +3708,23 @@ EDITORIAL_PRINCIPLES = (
     "Внешние источники используй только когда они реально улучшают понимание: для первоисточника, документа, точной цифры "
     "или необходимого контекста. Не используй внешние СМИ как автоматический фильтр против сведений из выбранных каналов. "
     "Не делай отдельный блок «фейки/манипуляции», если пользователь специально этого не просил. "
-    "Пиши естественным профессиональным новостным языком. Внутренние поля refs, message_key, channel_id, message_id, "
+    "Пиши естественным профессиональным языком, соответствующим материалу. Внутренние поля refs, message_key, channel_id, message_id, "
     "inherits_from_message_key, названия JSON-полей, пути и номера элементов, ссылки на файл или библиотеку ChatGPT и другие "
     "служебные идентификаторы используй только для анализа, сопоставления и восстановления сообщений. Никогда не показывай "
-    "их пользователю как источники, ссылки, цитаты или описание обработки данных. В готовом ответе также не упоминай файл, "
-    "JSON, выгрузку, локальную базу, синхронизацию, дедупликацию или алгоритм поиска. Пользователь должен видеть готовый обзор "
-    "событий, а не техническую структуру материала. Если у использованной публикации есть непустой telegram_url, оформляй "
-    "источник кликабельной Markdown-ссылкой на конкретный Telegram-пост, используя название канала как текст ссылки, например "
-    "**Источник:** [Название канала](https://t.me/example/12345). Обычно достаточно 1–3 наиболее полезных ссылок в конце "
+    "их пользователю как источники, ссылки, цитаты или описание обработки данных. Никогда не ссылайся на исходный JSON-файл "
+    "в пользовательском тексте, не называй его источником и не предлагай открыть файл. В готовом ответе также не упоминай "
+    "выгрузку, локальную базу, синхронизацию, дедупликацию или алгоритм поиска. Пользователь должен видеть готовый материал, "
+    "а не техническую структуру программы. Для публичной публикации оформляй источник стандартными Markdown-ссылками: "
+    "название канала ведёт на непустой channel_url, а подпись «Открыть публикацию» — на непустой telegram_url, например "
+    "**Источник:** [Название канала](channel_url) · [Открыть публикацию](telegram_url). Не показывай длинные URL открытым "
+    "текстом и не используй HTML/CSS для оформления ссылок. Обычно достаточно 1–3 наиболее полезных источников в конце "
     "блока события: выбирай первичное или наиболее содержательное сообщение, существенную альтернативную версию либо более "
-    "позднее важное обновление; не ссылайся на каждую перепечатку и не повторяй одну ссылку без необходимости. Если telegram_url "
-    "отсутствует или равен null, не придумывай и не конструируй URL по channel_id или message_id — укажи только название "
-    "канала обычным текстом. Основной текст должен быть самодостаточным: ссылки помогают проверить источник, но не заменяют обзор. "
+    "позднее важное обновление; не ссылайся на каждую перепечатку и не повторяй одну ссылку без необходимости. Если channel_url "
+    "или telegram_url отсутствует, не придумывай и не конструируй URL по channel_id или message_id: доступные ссылки используй, "
+    "а название закрытого канала оставляй обычным текстом. Основной текст должен быть самодостаточным: ссылки помогают проверить "
+    "источник, но не заменяют обзор. Если естественных тем несколько, назначь им разные цветные Unicode/emoji-маркеры из "
+    "палитры 🔵 🟢 🟣 🟠 🟡 🟤 ⚪ и сохраняй один маркер для одной темы внутри ответа. Не привязывай цвета к темам заранее. "
+    "Красный маркер 🔴 используй только для действительно срочного, критического или опасного материала либо не используй вовсе. "
     "Перед финальным ответом проверь охват: все содержательно значимые сюжеты периода или темы должны быть отражены "
     "хотя бы кратко. Не жертвуй важным одиночным сообщением ради красивой структуры; второстепенные, но полезные "
     "сюжеты лучше объединить в короткий блок, чем бесследно опустить. "
@@ -3744,6 +3735,8 @@ EDITORIAL_PRINCIPLES = (
 
 DIGEST_REQUEST = (
     "Подготовь итоговый редакторский дайджест за выбранный период. "
+    "Сначала определи характер материала по фактическому содержанию сообщений. Затем самостоятельно создай естественные темы, "
+    "выбери подходящую структуру и адаптируй стиль анализа к типу материала; фиксированного набора разделов нет. "
     "У точных повторов inherited_fields восстанавливай из родительской публикации по inherits_from_message_key. "
     "Если changes_since_previous_digest.comparison_available=true, используй его ссылки прежде всего для определения "
     "реально новых и содержательно изменённых публикаций; полный текст бери из news_messages/operational_messages. "
@@ -3752,14 +3745,14 @@ DIGEST_REQUEST = (
     "между версиями каналов. Объединяй публикации об одном событии и учитывай более поздние уточнения. "
     + EDITORIAL_PRINCIPLES +
     "Оформление делай адаптивным к объёму и насыщенности материала. Не создавай пустые рубрики и не раздувай "
-    "небольшой период искусственной структурой. Начни с выразительного заголовка и, если материала достаточно, блока "
+    "небольшой период искусственной структурой. Начни с выразительного заголовка и, только если материала достаточно, блока "
     "«Главное за период» из 3–7 очень коротких пунктов. Затем раскрой события в порядке важности либо естественной "
     "хронологии. Для каждого существенного сюжета используй короткий содержательный подзаголовок и 1–3 небольших абзаца: "
     "что произошло; какие новые детали, версии или оценки дали каналы; почему это важно или что может последовать. "
     "Указывай названия каналов там, где это помогает понять источник сообщения, различия версий или происхождение инсайда; "
-    "не превращай каждый абзац в перечень источников. Тематические разделы вроде «Харьков», «Война», «Украина», «Мир», "
-    "«Экономика и деньги» используй только когда в соответствующей теме действительно накопилось несколько содержательных "
-    "сюжетов. Если сообщений мало, достаточно 3–6 хорошо обработанных событий без искусственных рубрик. При среднем объёме "
+    "не превращай каждый абзац в перечень источников. Названия и границы тематических разделов определяй исключительно по "
+    "содержанию текущей подборки, не подставляя заранее заданные категории. Если сообщений мало, достаточно нескольких хорошо "
+    "обработанных событий без искусственных рубрик. При среднем объёме "
     "ориентируйся на 5–10 главных событий; при большом — на 7–12 главных событий плюс тематические блоки. "
     "Если есть существенные изменения относительно предыдущего обзора, в конце добавь короткий блок «Что изменилось». "
     "Если из событий естественно следуют важные точки наблюдения, добавь «Что важно дальше» из 2–5 пунктов; если таких "
@@ -3809,6 +3802,12 @@ def make_compact_message_ref(message):
         "channel": message.get(
             "channel"
         ),
+        "username": message.get(
+            "username"
+        ),
+        "channel_url": message.get(
+            "channel_url"
+        ) or public_channel_link(message.get("username")),
         "telegram_url": message.get(
             "telegram_url"
         ),
@@ -4883,6 +4882,8 @@ def build_search_chatgpt_instruction(question, effective_days, search_result):
     return (
         "Подготовь профессиональный тематический обзор по вопросу: "
         f"«{question}». Рассматриваемый период: последние {effective_days} дней. "
+        "Сначала определи характер найденного материала, затем самостоятельно выбери естественные подтемы, структуру, "
+        "порядок и стиль анализа. Не используй фиксированный набор разделов. "
         "Если пользователь после загрузки пишет только «дайджест», отвечай именно по этой теме, а не по всей повестке. "
         "search_results содержат основные найденные публикации; related_context используй только как связанный контекст; "
         "related_message_groups помогают распознавать перепечатки и общий источник. Если часть результатов найдена по смыслу, "
@@ -4890,7 +4891,7 @@ def build_search_chatgpt_instruction(question, effective_days, search_result):
         "Если история за период неполна, коротко предупреди об этом человеческим языком, не объясняя техническую причину. "
         + EDITORIAL_PRINCIPLES +
         "Для тематического обзора начни с 1–3 предложений с выводом о том, что происходило с темой в целом. Затем раскрой "
-        "события по естественной хронологии или по 2–5 смысловым подтемам. Покажи ключевые повороты, новые детали, кто именно "
+        "события по естественной хронологии или по самостоятельно определённым смысловым подтемам. Покажи ключевые повороты, новые детали, кто именно "
         "сообщал важный инсайд или версию, где сообщения каналов совпадают и где расходятся, а также состояние темы к концу "
         "периода. Если публикаций всего несколько, не строй искусственную многоуровневую структуру — просто ясно объясни их "
         "смысл и взаимосвязь. Если материала много, используй короткие подзаголовки и в конце при необходимости блок "
@@ -5042,8 +5043,8 @@ async def run_history_search_mode(
     print(
         "\nНапишите вопрос обычными словами. Примеры:\n"
         "  что с колл центрами\n"
-        "  ТЦК Харьков\n"
-        "  переговоры США Россия Украина\n"
+        "  квантовые батареи\n"
+        "  премьера сериала дата выхода\n"
         "  что происходило с налогами ФОП"
     )
 
@@ -5969,7 +5970,10 @@ def db_row_to_message(row, previous_run_utc):
     result.update(raw_text=data.get('raw_text'),raw_text_available=data.get('raw_text') is not None,
                   availability=data.get('availability') or 'available',
                   availability_checked_utc=data.get('availability_checked_utc'),
-                  unavailable_since_utc=data.get('unavailable_since_utc'))
+                  unavailable_since_utc=data.get('unavailable_since_utc'),
+                  channel_url=public_channel_link(result.get('username')),
+                  telegram_url=result.get('telegram_url') or public_link(
+                      result.get('username'), result.get('message_id')))
     if data.get('unavailable_since_utc') and (not previous_run_utc or data['unavailable_since_utc'] > previous_run_utc):
         result['change_status'] = 'unavailable_since_previous_digest'
     return result
@@ -6192,7 +6196,7 @@ SEARCH_PHRASE_ALIASES = [
 
 # Осторожный морфологический префикс: не «режем всё до пяти букв», а
 # убираем только типичные окончания, сохраняя минимум четыре буквы корня.
-# Это позволяет «почтой» найти «почта», «Харькове» — «Харьков» и т.п.
+# Это позволяет находить словоформы одного поискового термина.
 _SEARCH_INFLECTION_SUFFIXES = tuple(sorted({
     'иями','ями','ами','иями','овими','евими','ими','ыми',
     'ого','ему','ому','ої','ою','ею','ами','ями','ах','ях','ам','ям',
@@ -6740,7 +6744,7 @@ PREVIEW_HTML=r'''<!doctype html>
 header{background:#142a43;color:white;padding:30px max(24px,calc((100vw - 1100px)/2));border-bottom:5px solid #64b4d4}
 .eyebrow{color:#a9c8e6;letter-spacing:.16em;font-size:12px}h1{font-size:30px;margin:6px 0}header p{margin:0;color:#cbd9e8}
 main{max-width:1148px;margin:24px auto;padding:0 24px}.status{padding:15px 20px;border-radius:12px;background:#e2f2e9;color:#185436;margin-bottom:20px}
-.status.warn{background:#fff0d7;color:#774716}.toolbar{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px;background:white;padding:18px;border:1px solid var(--line);border-radius:14px}
+.status.warn{background:#fff0d7;color:#774716}.toolbar{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;background:white;padding:18px;border:1px solid var(--line);border-radius:14px}
 label{font-size:12px;font-weight:600;color:var(--muted)}input,select{display:block;width:100%;padding:11px;border:1px solid #b9c9db;border-radius:7px;background:white;color:var(--ink);font:14px 'Segoe UI'}
 #count{color:var(--muted);margin:18px 0}article{background:white;border:1px solid var(--line);border-radius:14px;padding:22px;margin:15px 0;box-shadow:0 3px 10px #13294505}
 .meta{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px}.channel{font-weight:700;color:var(--blue)}.body{white-space:pre-wrap;overflow-wrap:anywhere;margin:14px 0}
@@ -6750,18 +6754,19 @@ a{color:var(--blue)}details{border-top:1px solid var(--line);margin-top:13px;pad
 button{border:1px solid #b9c9db;border-radius:8px;padding:10px 18px;background:white;color:var(--blue);cursor:pointer}footer{padding:28px 0;color:var(--muted);font-size:12px}
 @media(max-width:750px){.toolbar{grid-template-columns:1fr 1fr}header{padding:22px}h1{font-size:24px}main{padding:0 14px}article{padding:16px}}
 @media print{.toolbar,button{display:none}header{background:white;color:black}article{break-inside:avoid}}
-</style></head><body><header><div class="eyebrow">TELEGRAMNEWSAI · 5.4.2</div><h1 id="title">Лента новостей</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
+</style></head><body><header><div class="eyebrow" id="eyebrow">TELEGRAMNEWSAI</div><h1 id="title">Лента публикаций</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
 <main><div id="quality" class="status"></div><details id="coverage"><summary>Полнота истории по каналам</summary><div id="coverageBody"></div></details>
 <div class="toolbar"><label>Найти в результатах<input id="query" placeholder="Слово, имя или фраза"></label><label>Канал<select id="channel"><option value="">Все каналы</option></select></label>
 <label>Состояние<select id="state"><option value="">Все сообщения</option><option value="new">Новые</option><option value="edited">Исправленные</option><option value="unavailable">Недоступные</option><option value="operational">Оперативные</option><option value="semantic">По смыслу</option></select></label>
-<label>Тема · по ключевым словам<select id="topic"><option value="">Все темы</option><option>Харьков</option><option>Война</option><option>Украина</option><option>Мир</option><option>Экономика</option></select></label></div>
+</div>
 <p id="count" aria-live="polite"></p><section id="cards"></section><button id="more" hidden>Показать ещё 100</button>
-<footer>Локальный просмотр выгрузки. Метки тем определяются по словам и могут быть неточными. Сходство и число перепечаток не подтверждают достоверность новости. Для анализа загрузите соответствующий JSON в ChatGPT.</footer></main>
+<footer>Локальный просмотр публикаций. Сходство и число перепечаток не являются независимым подтверждением сообщения.</footer></main>
 <script id="payload" type="application/json">__PAYLOAD__</script><script>
 'use strict';
 const payload=JSON.parse(document.getElementById('payload').textContent),meta=payload.meta||{};
 const $=id=>document.getElementById(id);
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
+$('eyebrow').textContent='TELEGRAMNEWSAI'+(meta.collector_version?' · '+meta.collector_version:'');
 const messages=[...(payload.news_messages||[]),...(payload.operational_messages||[]).map(m=>({...m,operational:true})),...(payload.search_results||[]),...(payload.related_context||[])];
 const history=meta.history_completeness||{},quality=$('quality');
 quality.classList.toggle('warn',history.complete!==true);
@@ -6775,11 +6780,11 @@ else $('subtitle').textContent='За '+(meta.hours||'?')+' ч. · '+(meta.create
 for(const c of history.channel_coverage||[])$('coverageBody').append(node('p',c.channel+' — '+(c.complete?'период загружен':'неполно')+(c.error?': '+c.error:''),'note'));
 if(!(history.channel_coverage||[]).length)$('coverage').hidden=true;
 for(const ch of [...new Set(messages.map(m=>m.channel||'Без названия'))].sort()){$('channel').append(node('option',ch));}
-const topicRules={'Харьков':/харьков|харків/i,'Война':/ракет|фронт|військ|войск|обстр[еі]л|зсу|всу|дрон/i,'Украина':/укра[иї]н|тцк|ки[еї]в|рада/i,'Мир':/сша|европ|європ|трамп|китай|нато/i,'Экономика':/эконом|економ|доллар|долар|курс|бюджет|банк|инфляц|інфляц|тариф/i};
 function kind(m){if(m.availability==='unavailable')return 'unavailable';if((m.change_status||'').startsWith('edited'))return 'edited';if((m.change_status||'').startsWith('new'))return 'new';return '';}
 const labels={new:'Новое',edited:'Исправлено',unavailable:'Недоступно в Telegram'};
 function detail(parent,label,text){const d=node('details'),s=node('summary',label);d.append(s,node('div',text,'version'));parent.append(d);}
-function card(m){const a=node('article'),top=node('div',undefined,'meta');top.append(node('span',m.channel||'Источник','channel'),node('span',m.date_local||m.date_utc||''));const k=kind(m);if(k)top.append(node('span',labels[k],'badge '+k));if(m.operational)top.append(node('span','Оперативное','badge'));if(m.search_match?.kind==='semantic')top.append(node('span','По смыслу','badge'));a.append(top,node('div',m.text||'[Без текста]','body'));
+function sourceNode(text,value){try{const url=new URL(value);if(url.protocol==='https:'&&url.hostname==='t.me'){const link=node('a',text,'channel');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';return link;}}catch(e){}return node('span',text,'channel');}
+function card(m){const a=node('article'),top=node('div',undefined,'meta');top.append(sourceNode(m.channel||'Источник',m.channel_url),node('span',m.date_local||m.date_utc||''));const k=kind(m);if(k)top.append(node('span',labels[k],'badge '+k));if(m.operational)top.append(node('span','Оперативное','badge'));if(m.search_match?.kind==='semantic')top.append(node('span','По смыслу','badge'));a.append(top,node('div',m.text||'[Без текста]','body'));
 if(m.telegram_url){try{const url=new URL(m.telegram_url);if(url.protocol==='https:'&&url.hostname==='t.me'){const link=node('a','Открыть публикацию ↗');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';a.append(link);}}catch(e){}}
 if(m.version_note)a.append(node('p',m.version_note,'note'));
 if(m.raw_text_available)detail(a,'Исходный текст до очистки',m.raw_text||'[Публикация без подписи]');
@@ -6789,8 +6794,8 @@ if(m.versions_truncated)a.append(node('p','Показаны последние �
 if((m.duplicates||[]).length){const d=node('details');d.append(node('summary','Точные повторы: '+m.duplicates.length));for(const dup of m.duplicates)d.append(card({...dup,duplicates:[]}));a.append(d);}
 return a;}
 let shown=100,filtered=[];
-function render(reset=true){if(reset)shown=100;const q=$('query').value.toLocaleLowerCase(),ch=$('channel').value,state=$('state').value,topic=$('topic').value;filtered=messages.filter(m=>(!q||(m.text||'').toLocaleLowerCase().includes(q))&&(!ch||m.channel===ch)&&(!state||kind(m)===state||(state==='operational'&&m.operational)||(state==='semantic'&&m.search_match?.kind==='semantic'))&&(!topic||topicRules[topic].test(m.text||'')));$('cards').replaceChildren(...filtered.slice(0,shown).map(card));$('count').textContent='Показано '+Math.min(shown,filtered.length)+' из '+filtered.length+' · всего в файле '+messages.length;$('more').hidden=shown>=filtered.length;if(!filtered.length)$('cards').append(node('p','Совпадений с выбранными фильтрами нет.'));}
-for(const id of ['query','channel','state','topic'])$(id).addEventListener('input',()=>render());$('more').addEventListener('click',()=>{shown+=100;render(false)});render();
+function render(reset=true){if(reset)shown=100;const q=$('query').value.toLocaleLowerCase(),ch=$('channel').value,state=$('state').value;filtered=messages.filter(m=>(!q||(m.text||'').toLocaleLowerCase().includes(q))&&(!ch||m.channel===ch)&&(!state||kind(m)===state||(state==='operational'&&m.operational)||(state==='semantic'&&m.search_match?.kind==='semantic')));$('cards').replaceChildren(...filtered.slice(0,shown).map(card));$('count').textContent='Показано '+Math.min(shown,filtered.length)+' из '+filtered.length+' · всего '+messages.length;$('more').hidden=shown>=filtered.length;if(!filtered.length)$('cards').append(node('p','Совпадений с выбранными фильтрами нет.'));}
+for(const id of ['query','channel','state'])$(id).addEventListener('input',()=>render());$('more').addEventListener('click',()=>{shown+=100;render(false)});render();
 </script></body></html>'''
 
 

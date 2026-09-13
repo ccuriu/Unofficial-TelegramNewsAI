@@ -6,10 +6,10 @@ using System.Reflection;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("TelegramNewsAI")]
-[assembly: AssemblyDescription("Запуск TelegramNewsAI 5.4.2")]
+[assembly: AssemblyDescription("Запуск TelegramNewsAI 5.4.4")]
 [assembly: AssemblyProduct("TelegramNewsAI")]
-[assembly: AssemblyVersion("5.4.2.0")]
-[assembly: AssemblyFileVersion("5.4.2.0")]
+[assembly: AssemblyVersion("5.4.4.0")]
+[assembly: AssemblyFileVersion("5.4.4.0")]
 
 internal static class Program
 {
@@ -58,4 +58,3 @@ internal static class Program
         }
     }
 }
-
