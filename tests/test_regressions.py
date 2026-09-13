@@ -5,6 +5,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +78,38 @@ class OfflineRegressionTests(unittest.TestCase):
             LOCK_PATH.stat().st_mtime_ns if LOCK_PATH.exists() else None,
         )
         self.assertEqual(current_state, LOCK_STATE_BEFORE_IMPORT)
+
+    def test_telegram_code_prompt_strips_input(self):
+        with patch("builtins.input", return_value=" 12345 ") as mocked_input:
+            self.assertEqual(collector.prompt_telegram_code(), "12345")
+        mocked_input.assert_called_once_with(
+            "\nВведите код подтверждения из Telegram: "
+        )
+
+    def test_telegram_password_prompt_explains_hidden_input(self):
+        with patch.object(
+            collector,
+            "getpass",
+            return_value="секрет",
+        ) as mocked_getpass:
+            with patch("builtins.print") as mocked_print:
+                self.assertEqual(
+                    collector.prompt_telegram_password(),
+                    "секрет",
+                )
+
+        mocked_getpass.assert_called_once_with(
+            "Введите или вставьте пароль и нажмите Enter: "
+        )
+        printed = " ".join(
+            str(argument)
+            for call in mocked_print.call_args_list
+            for argument in call.args
+        )
+        self.assertIn(
+            "символы на экране не отображаются",
+            printed,
+        )
 
     def test_numbers_are_not_near_duplicates(self):
         prefix = "Подробная публикация о результатах проверки. " * 6

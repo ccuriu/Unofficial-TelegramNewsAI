@@ -325,6 +325,20 @@ def unique_keep_order(values):
 # Credentials
 # ============================================================
 
+def prompt_telegram_code():
+    return input("\nВведите код подтверждения из Telegram: ").strip()
+
+
+def prompt_telegram_password():
+    print("\nTelegram запросил пароль двухэтапной защиты.")
+    print(
+        "Ввод скрыт: символы на экране не отображаются — это нормально."
+    )
+    return getpass(
+        "Введите или вставьте пароль и нажмите Enter: "
+    )
+
+
 def load_or_create_credentials():
     if CRED_FILE.exists():
         try:
@@ -343,14 +357,28 @@ def load_or_create_credentials():
             )
             print("Сейчас нужно один раз заново ввести данные Telegram API.")
 
-    print("\nПервый запуск. Введите данные Telegram API.")
-    api_id_text = input("API ID: ").strip()
+    print("\n=== Первичная настройка Telegram ===")
+    print("Для подключения нужны API ID и API Hash.")
+    print(
+        "Получить их можно: "
+        "https://my.telegram.org → API development tools."
+    )
+    print("API ID — число, API Hash — строка букв и цифр.\n")
+
+    api_id_text = input("Введите API ID: ").strip()
     if not api_id_text.isdigit():
         raise ValueError("API ID должен состоять из цифр.")
 
-    api_hash = getpass("API HASH: ").strip()
+    print(
+        "\nAPI Hash вводится скрыто: "
+        "символы на экране не отображаются — это нормально."
+    )
+    api_hash = getpass(
+        "Введите или вставьте API Hash и нажмите Enter: "
+    ).strip()
     phone = input(
-        "Номер Telegram в международном формате, например +380...: "
+        "\nВведите номер Telegram в международном формате, "
+        "например +380...: "
     ).strip()
 
     data = {
@@ -5300,9 +5328,14 @@ async def ensure_telegram_client(client, creds, settings=None):
 
     print("\nПодключение к Telegram...")
     await client.start(
-        phone=creds["phone"]
+        phone=creds["phone"],
+        code_callback=prompt_telegram_code,
+        password=prompt_telegram_password,
     )
-    print("Авторизация успешна.")
+    print(
+        "Telegram успешно подключён. "
+        "Сессия сохранена — повторный ввод обычно не потребуется."
+    )
 
     return client, creds
 
