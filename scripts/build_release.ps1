@@ -30,9 +30,10 @@ if (Test-Path -LiteralPath $zipChecksum) { Remove-Item -LiteralPath $zipChecksum
 New-Item -ItemType Directory -Path $package -Force | Out-Null
 
 $allowed = @(
-    '.gitignore', 'INSTALL.bat', 'install.ps1', 'README.md', 'requirements.txt',
-    'run_python.bat', 'start_free.bat', 'telegram_collector_free.py',
-    'Telegram_Digest.exe', 'Telegram_Digest.exe.sha256'
+    'INSTALL.bat', 'install.ps1', 'README.md', 'LICENSE', 'SECURITY.md',
+    'requirements.txt', 'run_python.bat', 'start_free.bat',
+    'telegram_collector_free.py', 'Telegram_Digest.exe',
+    'Telegram_Digest.exe.sha256'
 )
 foreach ($name in $allowed) {
     $source = Join-Path $root $name
@@ -56,4 +57,3 @@ $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
 
 Write-Host "Release candidate: $zip"
 Write-Host "SHA-256: $hash"
-

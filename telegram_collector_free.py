@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""TelegramNewsAI 5.4 — полная выгрузка, улучшенный локальный поиск, проверка периода.
+"""TelegramNewsAI — локальный сбор, история и поиск Telegram-публикаций.
 Дайджест загружает новые сообщения и недостающую историю выбранного периода.
 Поиск предлагает обновление; локальный режим показывает актуальность базы.
 Полные тексты сохраняются без квот на каналы и без ограничения выдачи.
@@ -39,7 +39,11 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.5 Stable"
+APP_VERSION = "5.4.6 Stable"
+
+# Версия экспортируемого профиля дайджеста, независимая от версии приложения.
+# Меняется только при несовместимом изменении контракта JSON или инструкций.
+DIGEST_PROFILE_VERSION = "5.0"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -167,7 +171,7 @@ DEFAULT_SETTINGS = {
     "revision_export_limit": 3,
     "search_freshness_minutes": 15,
 
-    # Поиск 5.4: короткие многословные запросы не расширяются до
+    # Короткие многословные запросы не расширяются до
     # бессмысленного OR. Для 3+ слов разрешается только контролируемое
     # частичное совпадение с минимальным покрытием терминов.
     "search_partial_coverage": 0.67,
@@ -207,8 +211,8 @@ def load_settings():
     result = DEFAULT_SETTINGS.copy()
     result.update(data)
 
-    # Speed profile 5.1. These expensive options caused every search to scan
-    # Telegram again and load a 470 MB neural model.
+    # Эти ограничения не дают обычному поиску повторно сканировать Telegram
+    # и загружать тяжёлую нейронную модель без явной необходимости.
     result.update({
         "search_related_context_limit": 0,
         "deletion_check_limit": 0,
@@ -4105,7 +4109,7 @@ def _v4_save_output(
                 )
             ),
 
-            "digest_profile_version": "5.0",
+            "digest_profile_version": DIGEST_PROFILE_VERSION,
             "recommended_chatgpt_request": (
                 DIGEST_REQUEST
             ),
@@ -6610,7 +6614,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
     else:
         semantic_meta.update({
             'reason': 'optional_not_enabled',
-            'hint': 'Базовый поиск 5.4 работает без модели. Для смыслового резерва запустите программу с --setup-semantic один раз.',
+            'hint': 'Базовый поиск работает без модели. Для смыслового резерва запустите программу с --setup-semantic один раз.',
         })
 
     counts = Counter(m["channel"] for m in direct if m.get("channel"))
@@ -6697,7 +6701,7 @@ def print_database_status(conn, channels):
 
 def setup_semantic_search():
     """Одноразово ставит модель и включает смысловой резерв в settings_free.json."""
-    print('\nНастройка смыслового поиска. Это опционально: обычный поиск 5.4 работает и без модели.')
+    print('\nНастройка смыслового поиска. Это опционально: обычный поиск работает и без модели.')
     print('Устанавливаю sentence-transformers и загружаю multilingual-e5-small…')
     subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', 'sentence-transformers'])
     from sentence_transformers import SentenceTransformer

@@ -525,6 +525,48 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(collector.SOURCE_RULES), 1200)
         self.assertLess(len(collector.DIGEST_REQUEST), 6000)
 
+    def test_digest_profile_version_is_an_independent_export_contract(self):
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "5.0")
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
+
+    def test_user_facing_source_documentation_matches_fallback_order(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("источник по возможности ведёт непосредственно на конкретную исходную публикацию", readme)
+        self.assertIn("ссылка на сам канал используется только как резервный вариант", readme)
+        self.assertIn("не добавляет отдельную ссылку «Открыть публикацию»", readme)
+
+    def test_maintenance_text_has_no_obsolete_release_labels(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        for obsolete in (
+            "TelegramNewsAI 5.4 —",
+            "Поиск 5.4",
+            "Speed profile 5.1",
+            "Базовый поиск 5.4",
+            "обычный поиск 5.4",
+        ):
+            self.assertNotIn(obsolete, source)
+
+    def test_installer_requires_supported_python(self):
+        installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn("$minimumPython = [Version]'3.10'", installer)
+        self.assertIn("Get-PythonVersion", installer)
+        self.assertIn("$venvDir.unsupported-", installer)
+
+    def test_release_builder_uses_exact_maintenance_distribution(self):
+        builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
+        for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'"):
+            self.assertIn(required, builder)
+        self.assertNotIn("'.gitignore'", builder)
+
+    def test_ci_verifies_and_uploads_the_release_artifact(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("public-readiness-final", workflow)
+        self.assertIn("actions/checkout@v7", workflow)
+        self.assertIn("actions/setup-python@v7", workflow)
+        self.assertIn("actions/upload-artifact@v7", workflow)
+        self.assertIn("Verify exact release ZIP contents", workflow)
+
     def test_preview_has_no_fixed_topic_classifier(self):
         self.assertNotIn("topicRules", collector.PREVIEW_HTML)
         self.assertNotIn('id="topic"', collector.PREVIEW_HTML)
