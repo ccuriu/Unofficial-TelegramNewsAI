@@ -16,9 +16,11 @@ collector.lock
 logs/
 Резервные_копии/
 models/
+Релизы/
 
 # Python environments, caches and reports
 .venv/
+.test-venv/
 venv/
 __pycache__/
 *.py[cod]
@@ -41,6 +43,10 @@ dist/
 *.rej
 *.pid
 *.zip
+telegram_collector_free.before-*.py
+BUILD_CLEAN_RELEASE.ps1
+README.txt
+ОТЧЁТ_*.md
 
 # Editors and operating systems
 .idea/
@@ -52,4 +58,3 @@ dist/
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
-
