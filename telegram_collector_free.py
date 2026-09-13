@@ -41,9 +41,10 @@ except ImportError:
 
 APP_VERSION = "5.4.6 Stable"
 
-# Версия экспортируемого профиля дайджеста, независимая от версии приложения.
-# Меняется только при несовместимом изменении контракта JSON или инструкций.
-DIGEST_PROFILE_VERSION = "5.0"
+# Версии экспортируемого JSON независимы от версии приложения.
+# Меняются только при несовместимом изменении контракта или инструкций.
+EXPORT_SCHEMA_VERSION = 6
+DIGEST_PROFILE_VERSION = "6.0"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -1959,10 +1960,11 @@ def get_previous_digest_reference(conn, channels):
 
     if ARCHIVE_DIR.exists():
         try:
+            # Папка содержит только датированные JSON-архивы дайджестов.
+            # Общий шаблон сохраняет чтение файлов, созданных старыми версиями,
+            # без переноса их исторического имени в новый экспортный контракт.
             archives = sorted(
-                ARCHIVE_DIR.glob(
-                    "ЗАГРУЗИТЬ_В_CHATGPT_*.json"
-                ),
+                ARCHIVE_DIR.glob("*.json"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -4029,7 +4031,7 @@ def _v4_save_output(
                 ),
             },
 
-            "schema_version": 5,
+            "schema_version": EXPORT_SCHEMA_VERSION,
             "artifact_type": "telegram_news_digest",
             "history_completeness": sync_stats.get("history_completeness", {}),
             "sync_quality": {
@@ -4110,7 +4112,7 @@ def _v4_save_output(
             ),
 
             "digest_profile_version": DIGEST_PROFILE_VERSION,
-            "recommended_chatgpt_request": (
+            "recommended_ai_request": (
                 DIGEST_REQUEST
             ),
         },
@@ -4131,7 +4133,7 @@ def _v4_save_output(
 
     archive_path = (
         ARCHIVE_DIR
-        / f"ЗАГРУЗИТЬ_В_CHATGPT_{stamp}.json"
+        / f"ДАЙДЖЕСТ_{stamp}.json"
     )
 
     # Сначала пишем временный файл,
@@ -4235,7 +4237,7 @@ def cleanup_old_files(settings):
 
     # Датированные готовые дайджесты.
     if ARCHIVE_DIR.exists():
-        for path in ARCHIVE_DIR.glob("ЗАГРУЗИТЬ_В_CHATGPT_*.json"):
+        for path in ARCHIVE_DIR.glob("*.json"):
             try:
                 if path.stat().st_mtime < archive_cutoff:
                     path.unlink()
@@ -4896,7 +4898,7 @@ def safe_filename_fragment(value, max_len=48):
     return value[:max_len].rstrip("._ ")
 
 
-def build_search_chatgpt_instruction(question, effective_days, search_result):
+def build_search_ai_instruction(question, effective_days, search_result):
     return (
         "Подготовь профессиональный тематический обзор по вопросу: "
         f"«{question}». Период: последние {effective_days} дней. Если пользователь после загрузки пишет только «дайджест», "
@@ -4942,7 +4944,7 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
         "meta": {
             "artifact_type": "telegram_topic_search_digest",
             "collector_version": APP_VERSION,
-            "schema_version": 5,
+            "schema_version": EXPORT_SCHEMA_VERSION,
             "created_local": now.isoformat(timespec="seconds"),
             "created_utc": iso_utc(now.astimezone(timezone.utc)),
             "search_intent": {
@@ -4992,10 +4994,10 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
                 "quick_check_result": db_maintenance.get("quick_check_result"),
             },
             "usage_hint": (
-                "Загрузите этот файл в ChatGPT и напишите только: дайджест. "
-                "Вопрос и период уже записаны внутри файла."
+                "Передайте этот файл ИИ-ассистенту и попросите подготовить дайджест. "
+                "Вопрос, период и редакционная инструкция уже записаны внутри файла."
             ),
-            "recommended_chatgpt_request": build_search_chatgpt_instruction(
+            "recommended_ai_request": build_search_ai_instruction(
                 result["question"],
                 result["effective_days"],
                 result,
@@ -5212,7 +5214,7 @@ async def run_history_search_mode(
             "в файл попали наиболее релевантные результаты."
         )
 
-    print("\nЗАГРУЖАЙ В CHATGPT:")
+    print("\nФАЙЛ ДЛЯ ИИ-АССИСТЕНТА:")
     print(latest_path.name)
 
     print(
@@ -5792,7 +5794,7 @@ async def _v4_main():
         )
 
         print(
-            "\nЗАГРУЖАЙ В CHATGPT:"
+            "\nФАЙЛ ДЛЯ ИИ-АССИСТЕНТА:"
         )
         print(
             latest_path.name
@@ -5831,9 +5833,8 @@ async def _v4_main():
             )
 
         print(
-            "\nПосле загрузки файла "
-            "в ChatGPT достаточно написать: "
-            "Дайджест"
+            "\nПосле передачи файла ИИ-ассистенту "
+            "попросите подготовить дайджест."
         )
 
         if settings.get(

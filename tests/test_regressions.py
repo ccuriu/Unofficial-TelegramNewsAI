@@ -526,9 +526,27 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(collector.DIGEST_REQUEST), 6000)
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "5.0")
+        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 6)
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "6.0")
         source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
+
+    def test_export_contract_is_ai_vendor_neutral(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn('"recommended_ai_request"', source)
+        self.assertNotIn('"recommended_chatgpt_request"', source)
+        self.assertTrue(hasattr(collector, "build_search_ai_instruction"))
+        self.assertFalse(hasattr(collector, "build_search_chatgpt_instruction"))
+        self.assertNotIn("ЗАГРУЗИТЬ_В_CHATGPT_", source)
+
+    def test_readme_positions_json_as_portable_ai_input(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("структурированных JSON-выгрузок для анализа в ИИ-ассистентах", readme)
+        self.assertIn("Формат выгрузки не привязан к конкретной модели", readme)
+        self.assertIn("основное тестирование TelegramNewsAI проводится в ChatGPT", readme)
+        self.assertIn("может различаться между платформами", readme)
+        self.assertNotIn("подготовки JSON для анализа в ChatGPT", readme)
 
     def test_user_facing_source_documentation_matches_fallback_order(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -599,7 +617,7 @@ class OfflineRegressionTests(unittest.TestCase):
                 self.assertNotIn("category", message)
 
     def test_topic_search_request_uses_human_sources(self):
-        request = collector.build_search_chatgpt_instruction(
+        request = collector.build_search_ai_instruction(
             "проверочная тема",
             7,
             {},
@@ -615,6 +633,38 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertNotIn("file citations", request.lower())
         self.assertNotIn("source chips", request.lower())
         self.assertLess(len(request), 5500)
+
+    def test_editorial_requests_do_not_depend_on_chatgpt_ui(self):
+        requests = collector.DIGEST_REQUEST + collector.build_search_ai_instruction(
+            "проверочная тема", 7, {}
+        )
+        self.assertNotIn("ChatGPT", requests)
+        self.assertNotIn("file citations", requests.lower())
+        self.assertNotIn("source chips", requests.lower())
+
+    def test_generated_digest_json_is_portable_and_uses_new_contract(self):
+        channels = [{"id": 10, "name": "A", "username": "a"}]
+        sync_stats = {
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 0,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+        latest, archive, _, _ = collector._v4_save_output(
+            [], [], [], 0, 0, 6, channels, sync_stats, None, None, [], self.settings
+        )
+        payload = __import__("json").loads(latest.read_text(encoding="utf-8"))
+        self.assertEqual(payload["meta"]["schema_version"], 6)
+        self.assertEqual(payload["meta"]["digest_profile_version"], "6.0")
+        self.assertIn("recommended_ai_request", payload["meta"])
+        self.assertNotIn("recommended_chatgpt_request", payload["meta"])
+        self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
 
 
 if __name__ == "__main__":
