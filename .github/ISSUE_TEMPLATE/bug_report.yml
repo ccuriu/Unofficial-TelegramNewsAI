@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Версия TelegramNewsAI
-      placeholder: "например 5.4.5 Stable"
+      placeholder: "например 5.4.6 Stable"
     validations:
       required: true
 

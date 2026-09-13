@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, public-readiness-final]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
@@ -42,18 +42,20 @@ jobs:
       - name: Ensure local data is not tracked
         shell: pwsh
         run: |
-          $pattern = '(^|/)(credentials(?:\.unreadable-[^/]*)?\.bin|[^/]*\.session(?:-journal)?|news\.db(?:-[^/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|/)(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)/'
+          $pattern = '(^|/)(credentials(?:\.unreadable-[^/]*)?\.bin|[^/]*\.session(?:-journal)?|news\.db(?:-[^/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|/)(Дайджесты|logs|Резервные_копии|Релизы|models|\.venv(?:\.unsupported-[^/]*)?|\.test-venv|__pycache__)/'
           $forbidden = @(git ls-files | Where-Object { $_ -match $pattern })
           if ($forbidden.Count) {
             $forbidden | ForEach-Object { Write-Error "Tracked local data: $_" }
             exit 1
           }
 
-      - name: Validate Windows installer syntax
+      - name: Validate PowerShell scripts
         shell: powershell
         run: |
-          $text = Get-Content -LiteralPath .\install.ps1 -Raw
-          [void][ScriptBlock]::Create($text)
+          foreach ($path in @('.\install.ps1', '.\scripts\build_release.ps1', '.\launcher\build_launcher.ps1')) {
+            $text = Get-Content -LiteralPath $path -Raw
+            [void][ScriptBlock]::Create($text)
+          }
 
       - name: Verify launcher checksum and self-test
         shell: pwsh
@@ -73,3 +75,46 @@ jobs:
         shell: powershell
         run: |
           .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+
+      - name: Verify exact release ZIP contents
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zips = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\release" -Filter '*.zip' -File)
+          if ($zips.Count -ne 1) { throw "Expected exactly one release ZIP, found $($zips.Count)." }
+          $archive = [IO.Compression.ZipFile]::OpenRead($zips[0].FullName)
+          try {
+            $prefix = [IO.Path]::GetFileNameWithoutExtension($zips[0].Name) + '/'
+            $actual = @($archive.Entries | Where-Object { $_.Name } | ForEach-Object {
+              $name = $_.FullName -replace '\\', '/'
+              if (-not $name.StartsWith($prefix, [StringComparison]::Ordinal)) {
+                throw "Unexpected ZIP root: $name"
+              }
+              $name.Substring($prefix.Length)
+            } | Sort-Object)
+          }
+          finally {
+            $archive.Dispose()
+          }
+          $expected = @(
+            'INSTALL.bat', 'LICENSE', 'README.md', 'SECURITY.md',
+            'Telegram_Digest.exe', 'Telegram_Digest.exe.sha256', 'install.ps1',
+            'requirements.txt', 'run_python.bat', 'start_free.bat',
+            'telegram_collector_free.py'
+          ) | Sort-Object
+          $difference = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
+          if ($difference.Count) {
+            $difference | Format-Table | Out-String | Write-Error
+            throw 'Release ZIP does not match the exact whitelist.'
+          }
+          if ($actual.Count -ne 11) { throw "Expected 11 files, found $($actual.Count)." }
+
+      - name: Upload verified release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: TelegramNewsAI-5.4.6-Stable-Windows
+          path: |
+            ${{ runner.temp }}/release/TelegramNewsAI-5.4.6-Stable-Windows.zip
+            ${{ runner.temp }}/release/TelegramNewsAI-5.4.6-Stable-Windows.sha256.txt
+          if-no-files-found: error
+          retention-days: 30

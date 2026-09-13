@@ -20,6 +20,7 @@ models/
 
 # Python environments, caches and reports
 .venv/
+.venv.unsupported-*/
 .test-venv/
 venv/
 __pycache__/
