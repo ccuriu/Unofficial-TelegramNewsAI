@@ -125,6 +125,18 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_public_link_without_username_is_none(self):
         self.assertIsNone(collector.public_link(None, 12345))
 
+    def test_public_channel_link_uses_username(self):
+        self.assertEqual(
+            collector.public_channel_link("example"),
+            "https://t.me/example",
+        )
+
+    def test_public_channel_link_without_username_is_none(self):
+        self.assertIsNone(collector.public_channel_link(None))
+
+    def test_invalid_public_username_is_not_linked(self):
+        self.assertIsNone(collector.public_channel_link("not valid"))
+
     def test_normalized_message_export_keeps_telegram_url(self):
         message = collector.make_message(
             self.channel,
@@ -135,6 +147,7 @@ class OfflineRegressionTests(unittest.TestCase):
             ),
             self.settings,
         )
+        self.assertEqual(message["channel_url"], "https://t.me/test")
         self.assertEqual(message["telegram_url"], "https://t.me/test/12345")
 
     def test_compact_exact_duplicate_keeps_telegram_url(self):
@@ -142,7 +155,9 @@ class OfflineRegressionTests(unittest.TestCase):
         first = {
             "channel_id": 1,
             "channel": "Канал A",
+            "username": "channel_a",
             "message_id": 1,
+            "channel_url": "https://t.me/channel_a",
             "telegram_url": "https://t.me/channel_a/1",
             "text": text,
             "date_utc": collector.iso_utc(self.now),
@@ -152,7 +167,9 @@ class OfflineRegressionTests(unittest.TestCase):
             first,
             channel_id=2,
             channel="Канал B",
+            username="channel_b",
             message_id=2,
+            channel_url="https://t.me/channel_b",
             telegram_url="https://t.me/channel_b/2",
             views=2,
         )
@@ -160,6 +177,10 @@ class OfflineRegressionTests(unittest.TestCase):
             [first, second], self.settings
         )
         self.assertEqual((len(kept), exact, near), (1, 1, 0))
+        self.assertEqual(
+            kept[0]["duplicates"][0]["channel_url"],
+            "https://t.me/channel_b",
+        )
         self.assertEqual(
             kept[0]["duplicates"][0]["telegram_url"],
             "https://t.me/channel_b/2",
@@ -171,19 +192,27 @@ class OfflineRegressionTests(unittest.TestCase):
             {
                 "channel_id": 1,
                 "channel": "Канал A",
+                "username": "channel_a",
                 "message_id": 10,
+                "channel_url": "https://t.me/channel_a",
                 "telegram_url": "https://t.me/channel_a/10",
                 "canonical_urls": [common_url],
             },
             {
                 "channel_id": 2,
                 "channel": "Канал B",
+                "username": "channel_b",
                 "message_id": 20,
+                "channel_url": "https://t.me/channel_b",
                 "telegram_url": "https://t.me/channel_b/20",
                 "canonical_urls": [common_url],
             },
         ]
         groups = collector.build_related_groups(messages)
+        self.assertEqual(
+            [item["channel_url"] for item in groups[0]["message_refs"]],
+            ["https://t.me/channel_a", "https://t.me/channel_b"],
+        )
         self.assertEqual(
             [item["telegram_url"] for item in groups[0]["message_refs"]],
             ["https://t.me/channel_a/10", "https://t.me/channel_b/20"],
@@ -191,15 +220,53 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_request_uses_telegram_urls_for_sources(self):
         request = collector.DIGEST_REQUEST
+        self.assertIn("channel_url", request)
         self.assertIn("telegram_url", request)
-        self.assertIn("кликабельной Markdown-ссылкой", request)
-        self.assertIn("1–3 наиболее полезных ссылок", request)
+        self.assertIn("Markdown-ссылками", request)
+        self.assertIn("1–3 наиболее полезных источников", request)
 
     def test_digest_request_hides_internal_references(self):
         request = collector.DIGEST_REQUEST
         self.assertIn("refs", request)
         self.assertIn("message_key", request)
         self.assertIn("Никогда не показывай их пользователю", request)
+        self.assertIn("Никогда не ссылайся на исходный JSON-файл", request)
+
+    def test_digest_request_is_topic_neutral_and_automatic(self):
+        request = collector.DIGEST_REQUEST.lower()
+        for fixed_topic in ("харьков", "украина", "война"):
+            self.assertNotIn(fixed_topic, request)
+        self.assertIn("определи характер материала", request)
+        self.assertIn("самостоятельно создай естественные темы", request)
+        self.assertIn("адаптируй стиль анализа", request)
+        self.assertIn("фиксированного набора разделов нет", request)
+        self.assertIn("цветные unicode/emoji-маркеры", request)
+
+    def test_preview_has_no_fixed_topic_classifier(self):
+        self.assertNotIn("topicRules", collector.PREVIEW_HTML)
+        self.assertNotIn('id="topic"', collector.PREVIEW_HTML)
+        self.assertIn("m.channel_url", collector.PREVIEW_HTML)
+
+    def test_legacy_operational_hook_has_no_geographic_bias(self):
+        self.assertFalse(collector.is_routine_alert("Короткое сообщение любого содержания"))
+
+    def test_exports_do_not_assign_fixed_topics(self):
+        samples = {
+            "news": "Городской совет утвердил новый график движения",
+            "screen": "Студия объявила дату премьеры сериала",
+            "science": "Исследователи опубликовали результаты эксперимента",
+            "technology": "Компания представила новую вычислительную платформу",
+            "mixed": "Материал объединяет культурное событие и деловую встречу",
+        }
+        for label, text in samples.items():
+            with self.subTest(label=label):
+                message = collector.make_message(
+                    self.channel,
+                    SimpleNamespace(id=100, message=text, date=self.now),
+                    self.settings,
+                )
+                self.assertNotIn("topic", message)
+                self.assertNotIn("category", message)
 
     def test_topic_search_request_uses_human_sources(self):
         request = collector.build_search_chatgpt_instruction(
@@ -207,10 +274,13 @@ class OfflineRegressionTests(unittest.TestCase):
             7,
             {},
         )
+        self.assertIn("channel_url", request)
         self.assertIn("telegram_url", request)
-        self.assertIn("название канала как текст ссылки", request)
+        self.assertIn("Открыть публикацию", request)
         self.assertIn("не придумывай", request)
         self.assertIn("refs", request)
+        self.assertIn("Не используй фиксированный набор разделов", request)
+        self.assertIn("Никогда не ссылайся на исходный JSON-файл", request)
 
 
 if __name__ == "__main__":
