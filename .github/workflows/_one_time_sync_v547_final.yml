@@ -1,0 +1,55 @@
+name: One-time sync final v5.4.7 release
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_one_time_sync_v547_final.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Remove one-time workflow and finalize tree
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          Remove-Item -LiteralPath '.github/workflows/_one_time_sync_v547_final.yml'
+          git add -A
+          git commit -m "chore: finalize v5.4.7 public release"
+          git push origin HEAD:main
+          "CLEAN_SHA=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Point v5.4.7 at final clean tree
+        shell: pwsh
+        run: |
+          git tag -f v5.4.7 $env:CLEAN_SHA
+          git push origin refs/tags/v5.4.7 --force
+
+      - name: Build final release files
+        shell: pwsh
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+
+      - name: Replace release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.7-Stable-Windows.zip'
+          $sha = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.7-Stable-Windows.sha256.txt'
+          if (-not (Test-Path -LiteralPath $zip)) { throw "Release ZIP not found: $zip" }
+          if (-not (Test-Path -LiteralPath $sha)) { throw "SHA-256 file not found: $sha" }
+          gh release upload v5.4.7 $zip $sha --clobber
+          gh release edit v5.4.7 --target $env:CLEAN_SHA
