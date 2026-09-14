@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import sqlite3
 import tempfile
@@ -698,6 +699,35 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("recommended_ai_request", payload["meta"])
         self.assertNotIn("recommended_chatgpt_request", payload["meta"])
         self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
+
+
+class MenuCancellationRegressionTests(unittest.TestCase):
+    def test_back_command_aliases(self):
+        for value in ("0", "назад", "НАЗАД", "отмена", "back"):
+            with self.subTest(value=value):
+                self.assertTrue(collector.is_back_command(value))
+        self.assertFalse(collector.is_back_command(""))
+
+    def test_add_channels_can_be_cancelled_without_changes(self):
+        original = [{"id": 1, "name": "Test", "username": "test"}]
+        with patch("builtins.input", return_value="0"):
+            result = asyncio.run(
+                collector.prompt_add_public_channels(object(), original.copy())
+            )
+        self.assertEqual(result, original)
+
+    def test_remove_channels_can_be_cancelled_without_changes(self):
+        original = [{"id": 1, "name": "Test", "username": "test"}]
+        with patch("builtins.input", return_value="назад"):
+            result = collector.prompt_remove_channels(original.copy())
+        self.assertEqual(result, original)
+
+    def test_recreate_channel_list_can_be_cancelled(self):
+        with patch("builtins.input", return_value="0"):
+            result = asyncio.run(
+                collector.select_from_subscriptions(object(), [])
+            )
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
