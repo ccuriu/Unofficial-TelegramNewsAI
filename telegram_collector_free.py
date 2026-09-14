@@ -555,9 +555,9 @@ async def restore_saved_selection(client, subscribed_by_id):
 async def prompt_add_public_channels(client, items):
     print("\nМожно добавить публичные каналы БЕЗ подписки.")
     print("Поддерживаются:")
-    print("  @truexanewsua")
-    print("  https://t.me/truexanewsua")
-    print("  https://t.me/truexanewsua/12345")
+    print("  @example_channel")
+    print("  https://t.me/example_channel")
+    print("  https://t.me/example_channel/12345")
     print("Несколько адресов — через запятую.")
     print("0 — Назад (ничего не менять).")
 
@@ -899,7 +899,6 @@ PROMO_LINE_PATTERNS = [
     r"^\s*подпишись на канал\s*$",
     r"^\s*надіслати новину\s+@\S+\s*$",
     r"^\s*прислать новость\s+@\S+\s*$",
-    r"^\s*труха.*надіслати новину\s*$",
 ]
 
 
