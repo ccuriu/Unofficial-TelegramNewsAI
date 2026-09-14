@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.6 Stable"
+APP_VERSION = "5.4.7 Stable"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -321,6 +321,20 @@ def unique_keep_order(values):
     return out
 
 
+BACK_COMMANDS = {
+    "0",
+    "назад",
+    "back",
+    "отмена",
+    "cancel",
+}
+
+
+def is_back_command(value):
+    """Единая команда возврата из меню и незавершённого ввода."""
+    return str(value or "").strip().casefold() in BACK_COMMANDS
+
+
 # ============================================================
 # Credentials
 # ============================================================
@@ -545,12 +559,18 @@ async def prompt_add_public_channels(client, items):
     print("  https://t.me/truexanewsua")
     print("  https://t.me/truexanewsua/12345")
     print("Несколько адресов — через запятую.")
+    print("0 — Назад (ничего не менять).")
 
     raw = input(
-        "Ссылки/@имена [Enter=ничего не добавлять]: "
+        "Введите канал или каналы: "
     ).strip()
 
+    if is_back_command(raw):
+        print("Добавление отменено.")
+        return items
+
     if not raw:
+        print("Ничего не введено. Список не изменён.")
         return items
 
     added = 0
@@ -634,12 +654,18 @@ def prompt_remove_channels(items):
     print_selected_channels(items)
     print("\nВведите номера каналов, которые нужно удалить.")
     print("Пример: 2,5,8-10")
+    print("0 — Назад (ничего не удалять).")
 
     raw = input(
-        "Удалить [Enter=отмена]: "
+        "Удалить: "
     ).strip()
 
+    if is_back_command(raw):
+        print("Удаление отменено.")
+        return items
+
     if not raw:
+        print("Ничего не выбрано. Список не изменён.")
         return items
 
     try:
@@ -689,8 +715,14 @@ async def select_from_subscriptions(client, subscribed):
     print("\nВведите номера через запятую; диапазоны — через дефис.")
     print("Пример: 1,3,7-12")
     print("Можно написать all.")
+    print("0 — Назад (сохранить прежний список).")
 
     raw = input("Выбор: ").strip().lower()
+
+    if is_back_command(raw):
+        print("Создание нового списка отменено.")
+        return None
+
     selected_nums = set()
 
     if raw == "all":
@@ -757,10 +789,15 @@ async def resolve_channels(
 
     # Если сохранённого списка ещё нет, сначала создаём его.
     if not restored:
-        restored = await select_from_subscriptions(
+        new_selection = await select_from_subscriptions(
             client,
             subscribed,
         )
+
+        if new_selection is None:
+            return []
+
+        restored = new_selection
 
         if not restored:
             return []
@@ -788,17 +825,17 @@ async def resolve_channels(
                 f"\nСохранённый список: "
                 f"{len(restored)} каналов."
             )
-            print("Enter — продолжить / выйти из управления")
             print("A     — добавить публичный канал(ы)")
             print("R     — удалить канал")
             print("L     — показать текущий список")
             print("N     — создать список заново")
+            print("0     — назад")
 
             ans = input(
-                "Ваш выбор [Enter/A/R/L/N]: "
+                "Ваш выбор [A/R/L/N/0]: "
             ).strip().lower()
 
-        if ans in ("", "enter"):
+        if is_back_command(ans) or ans in ("", "enter"):
             save_selection(restored)
             return restored
 
@@ -831,10 +868,17 @@ async def resolve_channels(
             continue
 
         if ans in ("n", "new", "н", "заново"):
-            restored = await select_from_subscriptions(
+            new_selection = await select_from_subscriptions(
                 client,
                 subscribed,
             )
+
+            if new_selection is None:
+                if return_after_initial and initial_action:
+                    return restored
+                continue
+
+            restored = new_selection
             save_selection(restored)
 
             if return_after_initial and initial_action:
@@ -5091,8 +5135,13 @@ async def run_history_search_mode(
         "  премьера сериала дата выхода\n"
         "  что происходило с налогами ФОП"
     )
+    print("0 — Назад в главное меню.")
 
     question = input("\nЧто ищем: ").strip()
+
+    if is_back_command(question):
+        print("Поиск отменён.")
+        return None
 
     if not question:
         print("Пустой запрос — поиск отменён.")
@@ -5118,9 +5167,14 @@ async def run_history_search_mode(
         ),
     )
 
+    print("0 — Назад в главное меню.")
     raw_days = input(
         f"Период, дней [{default_days}; максимум {retention_days}]: "
     ).strip()
+
+    if is_back_command(raw_days):
+        print("Поиск отменён.")
+        return None
 
     try:
         days = (
@@ -5146,7 +5200,13 @@ async def run_history_search_mode(
         print(f"База свежая в пределах {history_status['freshness_minutes']:g} минут; поиск по локальному снимку.")
     else:
         print(f'Первая загрузка истории за {days} дней может быть долгой; «н» — поиск по имеющейся базе.')
-        update = input('Обновить устаревшие каналы и заполнить недостающий период? [Д/н]: ').strip().casefold()
+        update = input(
+            'Обновить устаревшие каналы и заполнить недостающий период? '
+            '[Д/н; 0=назад]: '
+        ).strip().casefold()
+        if is_back_command(update):
+            print('Поиск отменён.')
+            return None
         if update in ('', 'д', 'да', 'y', 'yes'):
             own_client, _ = await ensure_telegram_client(client, None, settings)
             try:
@@ -5172,7 +5232,12 @@ async def run_history_search_mode(
             f"в обычную выгрузку войдут {len(search_result['direct_results'])} "
             "наиболее релевантных публикаций."
         )
-        export_all = input("Выгрузить все результаты? [д/Н]: ").strip().casefold()
+        export_all = input(
+            "Выгрузить все результаты? [д/Н; 0=назад]: "
+        ).strip().casefold()
+        if is_back_command(export_all):
+            print("Поиск отменён.")
+            return None
         if export_all in ("д", "да", "y", "yes"):
             search_result = search_database(
                 conn,
@@ -5403,6 +5468,7 @@ async def _v4_main():
 
     try:
         channels = None
+        hours = None
 
         while True:
             print(
@@ -5431,18 +5497,20 @@ async def _v4_main():
             )
             print("  I         — состояние базы и каналов")
             print(
-                "  Q         — выйти"
+                "  0         — выйти"
             )
 
             mode = input(
-                "Выбор [Enter/D/S/B/A/R/L/N/I/Q]: "
+                "Выбор [Enter/D/S/B/A/R/L/N/I/0]: "
             ).strip().lower()
 
             if mode in ("i", "status"):
                 print_database_status(conn, load_selection())
                 continue
 
-            if mode in ("q", "quit", "exit", "в", "выход"):
+            if is_back_command(mode) or mode in (
+                "q", "quit", "exit", "в", "выход"
+            ):
                 print("\nВыход.")
                 return
 
@@ -5523,7 +5591,7 @@ async def _v4_main():
                     skip_menu=False,
                 )
                 print(
-                    "\nГотово. Изменения списка каналов сохранены."
+                    "\nВозврат в главное меню. Текущий список сохранён."
                 )
                 print(
                     "Можно сразу запустить дайджест, поиск или выполнить другую команду."
@@ -5541,39 +5609,45 @@ async def _v4_main():
                     client,
                     skip_menu=True,
                 )
+
+                if not channels:
+                    print(
+                        "\nНет выбранных каналов."
+                    )
+                    continue
+
+                default_hours = settings.get(
+                    "default_hours",
+                    24,
+                )
+
+                print("0 — Назад в главное меню.")
+                raw_hours = input(
+                    "\nЗа сколько последних часов "
+                    f"сделать выгрузку? "
+                    f"[{default_hours}]: "
+                ).strip()
+
+                if is_back_command(raw_hours):
+                    print("Создание дайджеста отменено.")
+                    channels = None
+                    continue
+
+                try:
+                    hours = (
+                        float(raw_hours)
+                        if raw_hours
+                        else float(default_hours)
+                    )
+                except ValueError:
+                    hours = float(default_hours)
+
+                if hours <= 0:
+                    hours = float(default_hours)
+
                 break
 
             print("\nНеизвестная команда. Выберите пункт из меню.")
-
-
-        if not channels:
-            print(
-                "Не выбрано ни одного канала."
-            )
-            return
-
-        default_hours = settings.get(
-            "default_hours",
-            24,
-        )
-
-        raw_hours = input(
-            "\nЗа сколько последних часов "
-            f"сделать выгрузку? "
-            f"[{default_hours}]: "
-        ).strip()
-
-        try:
-            hours = (
-                float(raw_hours)
-                if raw_hours
-                else float(default_hours)
-            )
-        except ValueError:
-            hours = float(default_hours)
-
-        if hours <= 0:
-            hours = float(default_hours)
 
         (
             previous_run_utc,
