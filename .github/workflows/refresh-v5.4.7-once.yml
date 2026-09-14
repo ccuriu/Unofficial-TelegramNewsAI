@@ -1,0 +1,109 @@
+name: Refresh v5.4.7 once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-v5.4.7-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.repository == 'ccuriu/TelegramNewsAI'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: 635f816b0a9dbf9a0eb10c795ae86fab8c27ef63
+      RELEASE_TAG: v5.4.7
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Verify version
+        shell: pwsh
+        run: |
+          $match = Select-String -LiteralPath '.\telegram_collector_free.py' -Pattern '^APP_VERSION\s*=\s*"([^"]+)"'
+          if (-not $match) { throw 'APP_VERSION not found.' }
+          if ($match.Matches[0].Groups[1].Value -ne '5.4.7 Stable') { throw 'Unexpected APP_VERSION.' }
+
+      - name: Build clean Windows release
+        shell: pwsh
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+
+      - name: Verify exact ZIP contents
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.7-Stable-Windows.zip'
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $prefix = 'TelegramNewsAI-5.4.7-Stable-Windows/'
+            $actual = @($archive.Entries | Where-Object { $_.Name } | ForEach-Object {
+              $name = $_.FullName -replace '\\', '/'
+              if (-not $name.StartsWith($prefix, [StringComparison]::Ordinal)) { throw "Unexpected ZIP root: $name" }
+              $name.Substring($prefix.Length)
+            } | Sort-Object)
+          }
+          finally { $archive.Dispose() }
+          $expected = @(
+            'INSTALL.bat', 'LICENSE', 'README.md', 'SECURITY.md',
+            'Telegram_Digest.exe', 'Telegram_Digest.exe.sha256', 'install.ps1',
+            'requirements.txt', 'run_python.bat', 'start_free.bat',
+            'telegram_collector_free.py'
+          ) | Sort-Object
+          if (@(Compare-Object $expected $actual).Count) { throw 'Release ZIP contents differ from whitelist.' }
+
+      - name: Move v5.4.7 tag to refreshed commit
+        shell: pwsh
+        run: |
+          gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$env:RELEASE_TAG" -f sha=$env:RELEASE_SHA -F force=true | Out-Null
+
+      - name: Replace release assets and notes
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.7-Stable-Windows.zip'
+          $sum = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.7-Stable-Windows.sha256.txt'
+          gh release upload $env:RELEASE_TAG $zip $sum --repo $env:GITHUB_REPOSITORY --clobber
+
+          $notes = @'
+          ## TelegramNewsAI 5.4.7 Stable
+
+          Актуальная стабильная Windows-версия на 14 сентября 2026 года.
+
+          ### Что изменилось после 5.4.6
+
+          - улучшено меню добавления одного или нескольких Telegram-каналов;
+          - во вложенных пунктах `0` отменяет незавершённый ввод и возвращает в главное меню;
+          - улучшены подсказки первого запуска и работа с вводом Telegram-данных;
+          - README дополнен понятной инструкцией по получению Telegram API ID и API Hash;
+          - добавлена понятная инструкция по полному удалению программы и её локальных данных;
+          - расширены регрессионные проверки без изменения принципов хранения базы, поиска и формирования дайджеста.
+
+          ### Установка
+
+          Скачайте `TelegramNewsAI-5.4.7-Stable-Windows.zip`, проверьте SHA-256 по приложенному файлу и запустите `INSTALL.bat`.
+
+          ### Удаление
+
+          TelegramNewsAI не требует отдельного деинсталлятора: закройте программу, удалите её папку и при необходимости ярлык с рабочего стола. Отдельно установленный Python при этом остаётся в Windows.
+          '@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title 'TelegramNewsAI 5.4.7 Stable' --notes-file $notesPath --latest
+
+      - name: Verify refreshed release
+        shell: pwsh
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          $assets = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
+          $expected = @('TelegramNewsAI-5.4.7-Stable-Windows.sha256.txt','TelegramNewsAI-5.4.7-Stable-Windows.zip') | Sort-Object
+          if (@(Compare-Object $expected $assets).Count) { throw 'Unexpected release assets.' }
+          $ref = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($ref.object.sha -ne $env:RELEASE_SHA) { throw "Tag points to $($ref.object.sha), expected $env:RELEASE_SHA" }
