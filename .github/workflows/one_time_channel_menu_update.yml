@@ -1,0 +1,71 @@
+name: One-time channel menu update
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one_time_channel_menu_update.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-menu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update menu text safely
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import py_compile
+
+          path = Path('telegram_collector_free.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              ('print("A     — добавить публичный канал")',
+               'print("A     — добавить публичный канал(ы)")'),
+              ('"  A         — добавить канал"',
+               '"  A         — добавить канал(ы)"'),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Ожидалось ровно одно вхождение {old!r}, найдено: {count}')
+              text = text.replace(old, new, 1)
+
+          checks = {
+              'старое вторичное меню': 'print("A     — добавить публичный канал")' not in text,
+              'старое главное меню': '"  A         — добавить канал"' not in text,
+              'новое вторичное меню': 'A     — добавить публичный канал(ы)' in text,
+              'новое главное меню': '"  A         — добавить канал(ы)"' in text,
+              'подсказка нескольких адресов': 'Несколько адресов — через запятую.' in text,
+              'актуальная подсказка пароля': 'def prompt_telegram_password()' in text,
+              'актуальная подсказка API': 'API development tools' in text,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Проверка не пройдена: ' + ', '.join(failed))
+
+          path.write_text(text, encoding='utf-8')
+          py_compile.compile(str(path), doraise=True)
+          print('Проверка меню и синтаксиса пройдена.')
+          PY
+
+          git diff --check
+
+      - name: Commit clean result and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "TelegramNewsAI maintenance"
+          git config user.email "actions@users.noreply.github.com"
+          git add telegram_collector_free.py
+          git rm .github/workflows/one_time_channel_menu_update.yml
+          git commit -m "Clarify multi-channel add menu"
+          git push origin HEAD:main
