@@ -710,7 +710,7 @@ class MenuCancellationRegressionTests(unittest.TestCase):
 
     def test_add_channels_can_be_cancelled_without_changes(self):
         original = [{"id": 1, "name": "Test", "username": "test"}]
-        with patch("builtins.input", return_value="0"):
+        with patch("builtins.input", return_value="0"), patch("builtins.print"):
             result = asyncio.run(
                 collector.prompt_add_public_channels(object(), original.copy())
             )
@@ -718,12 +718,12 @@ class MenuCancellationRegressionTests(unittest.TestCase):
 
     def test_remove_channels_can_be_cancelled_without_changes(self):
         original = [{"id": 1, "name": "Test", "username": "test"}]
-        with patch("builtins.input", return_value="назад"):
+        with patch("builtins.input", return_value="назад"), patch("builtins.print"):
             result = collector.prompt_remove_channels(original.copy())
         self.assertEqual(result, original)
 
     def test_recreate_channel_list_can_be_cancelled(self):
-        with patch("builtins.input", return_value="0"):
+        with patch("builtins.input", return_value="0"), patch("builtins.print"):
             result = asyncio.run(
                 collector.select_from_subscriptions(object(), [])
             )
