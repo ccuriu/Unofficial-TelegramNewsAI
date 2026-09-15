@@ -31,7 +31,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 try:
     from telethon import TelegramClient
-    from telethon.errors import FloodWaitError
+    from telethon.errors import ApiIdInvalidError, FloodWaitError
     from telethon.tl.types import Channel
 except ImportError:
     print("Telethon не установлен.")
@@ -353,11 +353,75 @@ def prompt_telegram_password():
     )
 
 
+def is_valid_api_hash(value):
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{32}",
+            str(value or "").strip(),
+        )
+    )
+
+
+def prompt_api_hash():
+    print(
+        "\nAPI Hash вводится скрыто: "
+        "символы на экране не отображаются — это нормально."
+    )
+    print(
+        "Если вставка в скрытое поле сработала неправильно, "
+        "используйте Shift+Insert или правую кнопку мыши."
+    )
+
+    while True:
+        api_hash = getpass(
+            "Введите или вставьте API Hash и нажмите Enter: "
+        ).strip()
+
+        if is_valid_api_hash(api_hash):
+            return api_hash
+
+        print(
+            f"API Hash введён некорректно: длина {len(api_hash)}, "
+            "ожидается 32 символа 0-9/a-f."
+        )
+
+        if len(api_hash) <= 1:
+            print(
+                "Похоже, сочетание клавиш вставило управляющий символ "
+                "вместо текста. Попробуйте Shift+Insert или правую кнопку мыши."
+            )
+
+
+def save_credentials(data):
+    CRED_FILE.write_bytes(
+        dpapi_encrypt(
+            json.dumps(
+                data,
+                ensure_ascii=False,
+            ).encode("utf-8")
+        )
+    )
+
+
 def load_or_create_credentials():
     if CRED_FILE.exists():
         try:
             raw = dpapi_decrypt(CRED_FILE.read_bytes())
-            return json.loads(raw.decode("utf-8"))
+            data = json.loads(raw.decode("utf-8"))
+            if (
+                isinstance(data, dict)
+                and isinstance(data.get("api_id"), int)
+                and data.get("api_id", 0) > 0
+                and is_valid_api_hash(data.get("api_hash"))
+                and str(data.get("phone") or "").strip()
+            ):
+                return data
+
+            print(
+                "Сохранённые данные Telegram API имеют неверный формат. "
+                "Нужно ввести их заново."
+            )
+            CRED_FILE.unlink(missing_ok=True)
         except Exception as e:
             print(f"Не удалось прочитать credentials.bin: {e}")
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -369,7 +433,9 @@ def load_or_create_credentials():
                 "Старые данные авторизации не удалены и сохранены в "
                 f"{backup_file.name}."
             )
-            print("Сейчас нужно один раз заново ввести данные Telegram API.")
+            print(
+                "Сейчас нужно один раз заново ввести данные Telegram API."
+            )
 
     print("\n=== Первичная настройка Telegram ===")
     print("Для подключения нужны API ID и API Hash.")
@@ -377,36 +443,29 @@ def load_or_create_credentials():
         "Получить их можно: "
         "https://my.telegram.org → API development tools."
     )
-    print("API ID — число, API Hash — строка букв и цифр.\n")
-
-    api_id_text = input("Введите API ID: ").strip()
-    if not api_id_text.isdigit():
-        raise ValueError("API ID должен состоять из цифр.")
-
     print(
-        "\nAPI Hash вводится скрыто: "
-        "символы на экране не отображаются — это нормально."
+        "API ID — число, API Hash — 32 символа из цифр и букв a-f.\n"
     )
-    api_hash = getpass(
-        "Введите или вставьте API Hash и нажмите Enter: "
-    ).strip()
+
+    while True:
+        api_id_text = input("Введите API ID: ").strip()
+        if api_id_text.isdigit() and int(api_id_text) > 0:
+            break
+        print(
+            "API ID должен состоять из цифр. Попробуйте ещё раз."
+        )
+
+    api_hash = prompt_api_hash()
     phone = input(
         "\nВведите номер Telegram в международном формате, "
         "например +380...: "
     ).strip()
 
-    data = {
+    return {
         "api_id": int(api_id_text),
         "api_hash": api_hash,
         "phone": phone,
     }
-
-    CRED_FILE.write_bytes(
-        dpapi_encrypt(
-            json.dumps(data, ensure_ascii=False).encode("utf-8")
-        )
-    )
-    return data
 
 
 # ============================================================
@@ -5372,36 +5431,77 @@ async def ensure_telegram_client(client, creds, settings=None):
         except Exception:
             pass
 
-    if creds is None:
-        creds = load_or_create_credentials()
-
     flood_sleep_threshold = max(
         0,
         min(
             86400,
-            int((settings or DEFAULT_SETTINGS).get("telethon_flood_sleep_threshold_seconds", 60)),
+            int(
+                (settings or DEFAULT_SETTINGS).get(
+                    "telethon_flood_sleep_threshold_seconds",
+                    60,
+                )
+            ),
         ),
     )
 
-    client = TelegramClient(
-        SESSION_FILE,
-        creds["api_id"],
-        creds["api_hash"],
-        flood_sleep_threshold=flood_sleep_threshold,
-    )
+    while True:
+        if creds is None:
+            creds = load_or_create_credentials()
 
-    print("\nПодключение к Telegram...")
-    await client.start(
-        phone=creds["phone"],
-        code_callback=prompt_telegram_code,
-        password=prompt_telegram_password,
-    )
-    print(
-        "Telegram успешно подключён. "
-        "Сессия сохранена — повторный ввод обычно не потребуется."
-    )
+        candidate = TelegramClient(
+            SESSION_FILE,
+            creds["api_id"],
+            creds["api_hash"],
+            flood_sleep_threshold=flood_sleep_threshold,
+        )
 
-    return client, creds
+        print("\nПодключение к Telegram...")
+
+        try:
+            await candidate.start(
+                phone=creds["phone"],
+                code_callback=prompt_telegram_code,
+                password=prompt_telegram_password,
+            )
+
+        except ApiIdInvalidError:
+            try:
+                await candidate.disconnect()
+            except Exception:
+                pass
+
+            try:
+                CRED_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            print(
+                "\nTelegram отклонил API ID / API Hash. "
+                "Проверьте значения на "
+                "https://my.telegram.org → API development tools."
+            )
+            print(
+                "Неверные данные не сохранены. "
+                "Введите API ID и API Hash заново."
+            )
+
+            creds = None
+            client = None
+            continue
+
+        except Exception:
+            try:
+                await candidate.disconnect()
+            except Exception:
+                pass
+            raise
+
+        save_credentials(creds)
+        print(
+            "Telegram успешно подключён. "
+            "Сессия сохранена — повторный ввод обычно не потребуется."
+        )
+        return candidate, creds
 
 
 async def _v4_main():

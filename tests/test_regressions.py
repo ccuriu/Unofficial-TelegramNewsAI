@@ -87,6 +87,39 @@ class OfflineRegressionTests(unittest.TestCase):
             "\nВведите код подтверждения из Telegram: "
         )
 
+
+    def test_api_hash_validation_requires_32_hex_characters(self):
+        self.assertTrue(collector.is_valid_api_hash("a" * 32))
+        self.assertTrue(
+            collector.is_valid_api_hash(
+                "0123456789abcdef0123456789ABCDEF"
+            )
+        )
+        self.assertFalse(collector.is_valid_api_hash("a" * 31))
+        self.assertFalse(collector.is_valid_api_hash("\x16"))
+        self.assertFalse(collector.is_valid_api_hash("g" * 32))
+
+    def test_api_hash_prompt_retries_after_bad_hidden_paste(self):
+        with patch.object(
+            collector,
+            "getpass",
+            side_effect=["\x16", "a" * 32],
+        ) as mocked_getpass:
+            with patch("builtins.print") as mocked_print:
+                self.assertEqual(
+                    collector.prompt_api_hash(),
+                    "a" * 32,
+                )
+
+        self.assertEqual(mocked_getpass.call_count, 2)
+        printed = " ".join(
+            str(argument)
+            for call in mocked_print.call_args_list
+            for argument in call.args
+        )
+        self.assertIn("длина 1", printed)
+        self.assertIn("Shift+Insert", printed)
+
     def test_telegram_password_prompt_explains_hidden_input(self):
         with patch.object(
             collector,
