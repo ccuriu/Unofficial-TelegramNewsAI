@@ -1,0 +1,74 @@
+name: Apply mixed channel input fix once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-mixed-channel-input-fix-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Apply focused fix
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from textwrap import dedent
+          import os
+
+          helper = Path('.github/workflows/fix-mixed-channel-input-once.yml').read_text(encoding='utf-8')
+          start_marker = "          @'\n"
+          end_marker = "          '@ | Set-Content"
+          start = helper.index(start_marker) + len(start_marker)
+          end = helper.index(end_marker, start)
+          script = dedent(helper[start:end])
+          target = Path(os.environ['RUNNER_TEMP']) / 'mixed_input_patch.py'
+          target.write_text(script, encoding='utf-8')
+          print(target)
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\extract_patch.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\extract_patch.py"
+          python "$env:RUNNER_TEMP\mixed_input_patch.py"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile-check
+        run: python -m py_compile telegram_collector_free.py
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build 5.4.9 release candidate
+        shell: pwsh
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+          if (-not (Test-Path "$env:RUNNER_TEMP\release\TelegramNewsAI-5.4.9-Stable-Windows.zip")) { throw '5.4.9 ZIP missing' }
+          if (-not (Test-Path "$env:RUNNER_TEMP\release\TelegramNewsAI-5.4.9-Stable-Windows.sha256.txt")) { throw '5.4.9 checksum missing' }
+
+      - name: Commit fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add telegram_collector_free.py tests/test_regressions.py README.md
+          if (git diff --cached --quiet) { throw 'Patch produced no changes.' }
+          git commit -m "fix: accept mixed channel numbers and Telegram links"
+          git push origin HEAD:main
