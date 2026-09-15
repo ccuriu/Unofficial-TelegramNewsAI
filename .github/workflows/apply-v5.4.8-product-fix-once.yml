@@ -1,0 +1,121 @@
+name: Apply verified 5.4.8 product fix once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v5.4.8-product-fix-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Apply already verified hardening patch
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from textwrap import dedent
+
+          helper = Path('.github/workflows/harden-telegram-session-once.yml').read_text(encoding='utf-8')
+          start_marker = "          @'\n"
+          end_marker = "          '@ | Set-Content"
+          start = helper.index(start_marker) + len(start_marker)
+          end = helper.index(end_marker, start)
+          script = dedent(helper[start:end])
+          out = Path(__import__('os').environ['RUNNER_TEMP']) / 'verified_patch.py'
+          out.write_text(script, encoding='utf-8')
+          print(out)
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\extract.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\extract.py"
+          python "$env:RUNNER_TEMP\verified_patch.py"
+
+      - name: Make R and L fully local
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          path = Path('telegram_collector_free.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''            if mode in channel_action_aliases:
+              client, creds = await ensure_telegram_client(
+                  client,
+                  creds,
+                  settings,
+              )
+
+              await resolve_channels(
+                  client,
+                  initial_action=channel_action_aliases[mode],
+                  return_after_initial=True,
+                  skip_menu=False,
+              )
+          '''.replace('              ', '    ')
+          new = '''            if mode in channel_action_aliases:
+              channel_action = channel_action_aliases[mode]
+
+              # Только добавление публичного канала и пересоздание списка
+              # требуют Telegram. Просмотр и удаление работают локально.
+              if channel_action in ("a", "n"):
+                  client, creds = await ensure_telegram_client(
+                      client,
+                      creds,
+                      settings,
+                  )
+
+              await resolve_channels(
+                  client,
+                  initial_action=channel_action,
+                  return_after_initial=True,
+                  skip_menu=False,
+              )
+          '''.replace('              ', '    ')
+          if old not in text:
+              raise SystemExit('Main channel action anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\local_menu.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\local_menu.py"
+
+      - name: Keep CI workflow out of product commit
+        shell: pwsh
+        run: git restore .github/workflows/ci.yml
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile-check
+        run: python -m py_compile telegram_collector_free.py
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build 5.4.8 release candidate
+        shell: pwsh
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+          if (-not (Test-Path "$env:RUNNER_TEMP\release\TelegramNewsAI-5.4.8-Stable-Windows.zip")) { throw '5.4.8 ZIP missing' }
+
+      - name: Commit product fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add telegram_collector_free.py tests/test_regressions.py README.md
+          if (git diff --cached --quiet) { throw 'Product patch produced no changes.' }
+          git commit -m "fix: harden Telegram session and single-instance handling"
+          git push origin HEAD:main
