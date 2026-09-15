@@ -49,13 +49,15 @@ jobs:
         run: |
           @'
           from pathlib import Path
+          from textwrap import dedent, indent
 
           path = Path('telegram_collector_free.py')
           text = path.read_text(encoding='utf-8')
           start_marker = '            if mode in channel_action_aliases:\n'
           start = text.index(start_marker)
           end = text.index('                print(', start)
-          new = '''            if mode in channel_action_aliases:
+          block = dedent('''\
+          if mode in channel_action_aliases:
               channel_action = channel_action_aliases[mode]
 
               # Только добавление публичного канала и пересоздание списка
@@ -73,7 +75,8 @@ jobs:
                   return_after_initial=True,
                   skip_menu=False,
               )
-          '''.replace('              ', '    ')
+          ''')
+          new = indent(block, '            ')
           path.write_text(text[:start] + new + text[end:], encoding='utf-8')
           '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\local_menu.py" -Encoding utf8
           python "$env:RUNNER_TEMP\local_menu.py"
