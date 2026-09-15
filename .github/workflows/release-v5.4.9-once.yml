@@ -1,0 +1,93 @@
+name: Release v5.4.9 once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v5.4.9-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: Checkout verified clean source
+        uses: actions/checkout@v7
+        with:
+          ref: 78e3e92b573af4d277672e55b5e30de048928f43
+
+      - name: Build clean Windows release
+        shell: pwsh
+        run: .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+
+      - name: Verify exact ZIP contents
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.9-Stable-Windows.zip'
+          if (-not (Test-Path $zip)) { throw '5.4.9 ZIP missing.' }
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $prefix = 'TelegramNewsAI-5.4.9-Stable-Windows/'
+            $actual = @($archive.Entries | Where-Object { $_.Name } | ForEach-Object {
+              $name = $_.FullName -replace '\\', '/'
+              if (-not $name.StartsWith($prefix, [StringComparison]::Ordinal)) { throw "Unexpected ZIP root: $name" }
+              $name.Substring($prefix.Length)
+            } | Sort-Object)
+          }
+          finally { $archive.Dispose() }
+          $expected = @(
+            'INSTALL.bat', 'LICENSE', 'README.md', 'SECURITY.md',
+            'Telegram_Digest.exe', 'Telegram_Digest.exe.sha256', 'install.ps1',
+            'requirements.txt', 'run_python.bat', 'start_free.bat',
+            'telegram_collector_free.py'
+          ) | Sort-Object
+          if (@(Compare-Object $expected $actual).Count) { throw 'Release ZIP contents differ from whitelist.' }
+          if ($actual.Count -ne 11) { throw "Expected 11 files, found $($actual.Count)." }
+
+      - name: Create v5.4.9 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.9-Stable-Windows.zip'
+          $sum = Join-Path $env:RUNNER_TEMP 'release\TelegramNewsAI-5.4.9-Stable-Windows.sha256.txt'
+          $notes = @'
+          ## TelegramNewsAI 5.4.9 Stable
+
+          Небольшое обновление интерфейса выбора каналов после реального пользовательского тестирования.
+
+          ### Что исправлено
+
+          - при пересоздании списка теперь можно в одной строке смешивать номера подписок, диапазоны и публичные Telegram-адреса;
+          - поддерживается ввод вида `3,7-10,12-36,https://t.me/channel,@another_channel`;
+          - `all` также можно сочетать с публичными адресами, например `all,@example_channel`;
+          - ссылки из смешанной строки больше не передаются в числовой парсер и не вызывают ошибку `Некорректный номер`;
+          - некорректные диапазоны по-прежнему проверяются относительно фактического размера списка;
+          - CI переведён на версионно-независимое имя артефакта и UTF-8 для Python-тестов Windows.
+
+          ### Установка
+
+          Скачайте `TelegramNewsAI-5.4.9-Stable-Windows.zip`, при желании сверьте SHA-256 с приложенным `.sha256.txt`, распакуйте архив и запустите `INSTALL.bat`.
+          '@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          gh release create v5.4.9 $zip $sum --repo $env:GITHUB_REPOSITORY --target 78e3e92b573af4d277672e55b5e30de048928f43 --title 'TelegramNewsAI 5.4.9 Stable' --notes-file $notesPath --latest
+
+      - name: Verify release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v5.4.9" | ConvertFrom-Json
+          if ($release.draft -or $release.prerelease) { throw 'v5.4.9 must be a stable release.' }
+          $assets = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
+          $expected = @('TelegramNewsAI-5.4.9-Stable-Windows.sha256.txt','TelegramNewsAI-5.4.9-Stable-Windows.zip') | Sort-Object
+          if (@(Compare-Object $expected $assets).Count) { throw 'Unexpected v5.4.9 release assets.' }
+          if ($release.body -notmatch '3,7-10,12-36') { throw 'Release notes are incomplete.' }
