@@ -16,6 +16,8 @@ jobs:
   validate:
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      PYTHONIOENCODING: utf-8
 
     steps:
       - name: Checkout
