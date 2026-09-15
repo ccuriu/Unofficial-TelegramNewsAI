@@ -28,7 +28,6 @@ jobs:
         shell: pwsh
         run: |
           @'
-          import re
           import textwrap
           from pathlib import Path
 
@@ -41,12 +40,13 @@ jobs:
               raise SystemExit('Telethon error import anchor not found')
           text = text.replace(old_import, new_import, 1)
 
-          helper_marker = '\ndef load_or_create_credentials():\n'
-          if helper_marker not in text:
-              raise SystemExit('Credential helper insertion anchor not found')
+          credentials_start = text.index('def load_or_create_credentials():')
+          credentials_end = text.index(
+              '\n\n# ============================================================\n# Channel selection',
+              credentials_start,
+          )
 
-          helpers = textwrap.dedent(r'''
-
+          helpers_and_credentials = textwrap.dedent(r'''
           def is_valid_api_hash(value):
               return bool(
                   re.fullmatch(
@@ -95,10 +95,8 @@ jobs:
                       ).encode("utf-8")
                   )
               )
-          ''')
-          text = text.replace(helper_marker, helpers + helper_marker, 1)
 
-          new_credentials = textwrap.dedent(r'''
+
           def load_or_create_credentials():
               if CRED_FILE.exists():
                   try:
@@ -162,19 +160,18 @@ jobs:
                   "api_hash": api_hash,
                   "phone": phone,
               }
-          ''').strip() + '\n\n'
+          ''').strip() + '\n'
 
-          credentials_pattern = re.compile(
-              r'def load_or_create_credentials\(\):\n.*?\n\n# ============================================================\n# Channel selection',
-              re.S,
+          text = (
+              text[:credentials_start]
+              + helpers_and_credentials
+              + text[credentials_end:]
           )
-          text, count = credentials_pattern.subn(
-              new_credentials + '# ============================================================\n# Channel selection',
-              text,
-              count=1,
+
+          client_start = text.index(
+              'async def ensure_telegram_client(client, creds, settings=None):'
           )
-          if count != 1:
-              raise SystemExit('Credential function anchor not found')
+          client_end = text.index('\n\nasync def _v4_main():', client_start)
 
           new_client = textwrap.dedent(r'''
           async def ensure_telegram_client(client, creds, settings=None):
@@ -260,20 +257,9 @@ jobs:
                       "Сессия сохранена — повторный ввод обычно не потребуется."
                   )
                   return candidate, creds
-          ''').strip() + '\n\n'
+          ''').strip() + '\n'
 
-          client_pattern = re.compile(
-              r'async def ensure_telegram_client\(client, creds, settings=None\):\n.*?\n\nasync def _v4_main\(\):',
-              re.S,
-          )
-          text, count = client_pattern.subn(
-              new_client + 'async def _v4_main():',
-              text,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit('Telegram client function anchor not found')
-
+          text = text[:client_start] + new_client + text[client_end:]
           source_path.write_text(text, encoding='utf-8')
 
           test_path = Path('tests/test_regressions.py')
@@ -282,7 +268,8 @@ jobs:
           if anchor not in tests:
               raise SystemExit('Test insertion anchor not found')
 
-          addition = textwrap.dedent(r'''
+          addition = textwrap.indent(
+              textwrap.dedent(r'''
               def test_api_hash_validation_requires_32_hex_characters(self):
                   self.assertTrue(collector.is_valid_api_hash("a" * 32))
                   self.assertTrue(
@@ -315,7 +302,9 @@ jobs:
                   self.assertIn("длина 1", printed)
                   self.assertIn("Shift+Insert", printed)
 
-          ''').replace('\n', '\n    ', 1)
+              '''),
+              '    ',
+          )
           tests = tests.replace(anchor, addition + anchor, 1)
           test_path.write_text(tests, encoding='utf-8')
 
