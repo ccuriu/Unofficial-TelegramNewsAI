@@ -29,19 +29,20 @@ jobs:
         run: |
           @'
           from pathlib import Path
+          from textwrap import dedent, indent
 
           source_path = Path('telegram_collector_free.py')
           text = source_path.read_text(encoding='utf-8')
 
           old_version = 'APP_VERSION = "5.4.7 Stable"'
-          new_version = 'APP_VERSION = "5.4.8 Stable"'
           if old_version not in text:
               raise SystemExit('APP_VERSION anchor not found')
-          text = text.replace(old_version, new_version, 1)
+          text = text.replace(old_version, 'APP_VERSION = "5.4.8 Stable"', 1)
 
           setup_start = text.index('def setup_logging():')
           setup_end = text.index('\n\nLOGGER = ', setup_start)
-          new_setup = '''def setup_logging():
+          new_setup = dedent('''\
+          def setup_logging():
               ensure_dirs()
               log_path = LOG_DIR / f"collector_{datetime.now().strftime('%Y-%m-%d')}.log"
               formatter = logging.Formatter(
@@ -58,8 +59,7 @@ jobs:
 
               # Telethon пишет сетевые предупреждения через logging. Без своего
               # обработчика Python отправляет WARNING/ERROR прямо в консоль,
-              # хотя библиотека часто сама восстанавливает соединение. Сохраняем
-              # диагностику в файл, не пугая пользователя техническими строками.
+              # хотя библиотека часто сама восстанавливает соединение.
               telethon_logger = logging.getLogger("telethon")
               telethon_logger.setLevel(logging.WARNING)
               telethon_logger.propagate = False
@@ -69,12 +69,15 @@ jobs:
                   telethon_logger.addHandler(telethon_handler)
 
               return logger
-          '''.replace('          ', '')
+          ''')
           text = text[:setup_start] + new_setup + text[setup_end:]
 
           lock_start = text.index('class InstanceLock:')
-          lock_end = text.index('\n\n# ============================================================', lock_start)
-          new_lock = r'''class InstanceLock:
+          exit_start = text.index('    def __exit__(self, *args):', lock_start)
+          last_line = text.index('            self.file = None', exit_start)
+          lock_end = text.index('\n', last_line) + 1
+          new_lock = dedent(r'''\
+          class InstanceLock:
               """Single-instance guard released automatically even after a crash."""
 
               GLOBAL_MUTEX_NAME = r"Local\TelegramNewsAI.SingleInstance"
@@ -87,9 +90,8 @@ jobs:
                   self.mutex_handle = None
 
               def __enter__(self):
-                  # Обычный запуск Windows использует именованный kernel mutex.
-                  # В отличие от collector.lock в папке программы он блокирует
-                  # второй экземпляр даже из другой распакованной копии.
+                  # Обычный Windows-запуск использует именованный kernel mutex.
+                  # Он блокирует вторую копию даже из другой папки установки.
                   if os.name == 'nt' and not self.explicit_path:
                       kernel32 = ctypes.windll.kernel32
                       create_mutex = kernel32.CreateMutexW
@@ -111,8 +113,8 @@ jobs:
                       self.mutex_handle = handle
                       return self
 
-                  # Явный path оставлен для тестов/служебных сценариев; на
-                  # других ОС это прежняя файловая блокировка.
+                  # Явный path сохраняет прежнюю файловую блокировку для
+                  # тестов/служебных сценариев и для не-Windows платформ.
                   self.file = self.path.open('a+b')
                   self.file.seek(0, 2)
                   if self.file.tell() == 0:
@@ -142,128 +144,101 @@ jobs:
                   if self.file:
                       self.file.close()
                       self.file = None
-          '''.replace('          ', '')
+          ''')
           text = text[:lock_start] + new_lock + text[lock_end:]
 
-          old_resolve = '''    print("\\nПолучаю список ваших подписок...")
-              dialogs = await client.get_dialogs(limit=None)
+          old_resolve_inner = dedent('''\
+          print("\\nПолучаю список ваших подписок...")
+          dialogs = await client.get_dialogs(limit=None)
 
-              subscribed = [d for d in dialogs if d.is_channel]
-              subscribed_by_id = {
-                  int(d.entity.id): d
-                  for d in subscribed
-              }
+          subscribed = [d for d in dialogs if d.is_channel]
+          subscribed_by_id = {
+              int(d.entity.id): d
+              for d in subscribed
+          }
 
-              restored = await restore_saved_selection(
-                  client,
-                  subscribed_by_id,
-              )
-          '''.replace('              ', '    ')
-          new_resolve = '''    pending_action = (
+          restored = await restore_saved_selection(
+              client,
+              subscribed_by_id,
+          )
+          ''')
+          old_resolve = indent(old_resolve_inner, '    ')
+
+          new_resolve_inner = dedent('''\
+          pending_action = (
               str(initial_action).strip().lower()
               if initial_action
               else None
           )
 
-              # A/R/L работают с уже сохранённым списком и не требуют полного
-              # чтения подписок. A обращается к Telegram только за новым каналом;
-              # R и L полностью локальные.
-              if pending_action in ("a", "r", "l"):
-                  restored = dedupe_channel_items(load_selection())
+          # A/R/L работают с уже сохранённым списком и не требуют полного
+          # чтения подписок. A обращается к Telegram только за новым каналом.
+          if pending_action in ("a", "r", "l"):
+              restored = dedupe_channel_items(load_selection())
 
-                  if pending_action == "a":
-                      restored = await prompt_add_public_channels(client, restored)
-                  elif pending_action == "r":
-                      restored = prompt_remove_channels(restored)
-                  else:
-                      print_selected_channels(restored)
+              if pending_action == "a":
+                  restored = await prompt_add_public_channels(client, restored)
+              elif pending_action == "r":
+                  restored = prompt_remove_channels(restored)
+              else:
+                  print_selected_channels(restored)
 
-                  save_selection(restored)
-                  return restored
+              save_selection(restored)
+              return restored
 
-              print("\\nПолучаю список ваших подписок...")
-              dialogs = await client.get_dialogs(limit=None)
+          print("\\nПолучаю список ваших подписок...")
+          dialogs = await client.get_dialogs(limit=None)
 
-              subscribed = [d for d in dialogs if d.is_channel]
-              subscribed_by_id = {
-                  int(d.entity.id): d
-                  for d in subscribed
-              }
+          subscribed = [d for d in dialogs if d.is_channel]
+          subscribed_by_id = {
+              int(d.entity.id): d
+              for d in subscribed
+          }
 
-              restored = await restore_saved_selection(
-                  client,
-                  subscribed_by_id,
-              )
-          '''.replace('              ', '    ')
+          restored = await restore_saved_selection(
+              client,
+              subscribed_by_id,
+          )
+          ''')
+          new_resolve = indent(new_resolve_inner, '    ')
           if old_resolve not in text:
               raise SystemExit('resolve_channels anchor not found')
           text = text.replace(old_resolve, new_resolve, 1)
 
-          old_pending = '''    pending_action = (
+          # Ниже функция раньше вычисляла pending_action второй раз.
+          duplicate_inner = dedent('''\
+          pending_action = (
               str(initial_action).strip().lower()
               if initial_action
               else None
           )
 
-              while True:
-          '''.replace('              ', '    ')
-          new_pending = '''    while True:
-          '''.replace('          ', '')
-          # Удаляем только второе вычисление pending_action, появившееся ниже.
-          second_at = text.find(old_pending, text.find('async def resolve_channels'))
-          if second_at != -1:
-              text = text[:second_at] + new_pending + text[second_at + len(old_pending):]
-
-          old_action = '''            if mode in channel_action_aliases:
-                  client, creds = await ensure_telegram_client(
-                      client,
-                      creds,
-                      settings,
-                  )
-
-                  await resolve_channels(
-                      client,
-                      initial_action=channel_action_aliases[mode],
-                      return_after_initial=True,
-                      skip_menu=False,
-                  )
-          '''.replace('                  ', '    ')
-          new_action = '''            if mode in channel_action_aliases:
-                  channel_action = channel_action_aliases[mode]
-
-                  # Добавление и пересоздание списка требуют Telegram.
-                  # Просмотр и удаление работают только с локальным JSON.
-                  if channel_action in ("a", "n"):
-                      client, creds = await ensure_telegram_client(
-                          client,
-                          creds,
-                          settings,
-                      )
-
-                  await resolve_channels(
-                      client,
-                      initial_action=channel_action,
-                      return_after_initial=True,
-                      skip_menu=False,
-                  )
-          '''.replace('                  ', '    ')
-          if old_action not in text:
-              raise SystemExit('main channel action anchor not found')
-          text = text.replace(old_action, new_action, 1)
+          while True:
+          ''')
+          duplicate = indent(duplicate_inner, '    ')
+          replacement = indent('while True:\n', '    ')
+          resolve_at = text.index('async def resolve_channels')
+          duplicate_at = text.find(duplicate, resolve_at)
+          if duplicate_at != -1:
+              text = text[:duplicate_at] + replacement + text[duplicate_at + len(duplicate):]
 
           source_path.write_text(text, encoding='utf-8')
 
           tests_path = Path('tests/test_regressions.py')
           tests = tests_path.read_text(encoding='utf-8')
-          tests = tests.replace(
-              'from unittest.mock import patch',
-              'from unittest.mock import AsyncMock, patch',
-              1,
-          )
+          if 'from unittest.mock import AsyncMock, patch' not in tests:
+              tests = tests.replace(
+                  'from unittest.mock import patch',
+                  'from unittest.mock import AsyncMock, patch',
+                  1,
+              )
+
           anchor = '    def test_numbers_are_not_near_duplicates(self):\n'
           if anchor not in tests:
               raise SystemExit('test insertion anchor not found')
-          addition = '''    def test_channel_add_does_not_fetch_all_subscriptions(self):
+
+          test_methods = dedent('''\
+          def test_channel_add_does_not_fetch_all_subscriptions(self):
               existing = [{"id": 10, "name": "Saved", "username": "saved_channel"}]
               client = SimpleNamespace(get_dialogs=AsyncMock())
 
@@ -286,20 +261,22 @@ jobs:
               client.get_dialogs.assert_not_awaited()
               mocked_save.assert_called_once_with(existing)
 
-              @unittest.skipUnless(os.name == "nt", "Windows named mutex")
-              def test_default_instance_lock_blocks_second_copy_across_folders(self):
-                  with collector.InstanceLock():
-                      original_app_dir = collector.APP_DIR
-                      try:
-                          collector.APP_DIR = self.directory / "other-copy"
-                          with self.assertRaisesRegex(RuntimeError, "уже запущен"):
-                              with collector.InstanceLock():
-                                  pass
-                      finally:
-                          collector.APP_DIR = original_app_dir
+          @unittest.skipUnless(os.name == "nt", "Windows named mutex")
+          def test_default_instance_lock_blocks_second_copy_across_folders(self):
+              with collector.InstanceLock():
+                  original_app_dir = collector.APP_DIR
+                  try:
+                      collector.APP_DIR = self.directory / "other-copy"
+                      with self.assertRaisesRegex(RuntimeError, "уже запущен"):
+                          with collector.InstanceLock():
+                              pass
+                  finally:
+                      collector.APP_DIR = original_app_dir
 
-          '''.replace('              ', '    ')
-          tests = tests.replace(anchor, addition + anchor, 1)
+          ''')
+          addition = indent(test_methods, '    ')
+          if 'def test_channel_add_does_not_fetch_all_subscriptions' not in tests:
+              tests = tests.replace(anchor, addition + anchor, 1)
           tests_path.write_text(tests, encoding='utf-8')
 
           readme_path = Path('README.md')
@@ -309,16 +286,16 @@ jobs:
               '![Release](https://img.shields.io/badge/release-5.4.8%20Stable-blue)',
               1,
           )
-          command_note = (
+          marker = 'Во вложенных пунктах `0` отменяет незавершённый ввод и возвращает в главное меню без изменения уже сохранённого списка каналов.\n'
+          note = (
               '\nTelegramNewsAI не допускает одновременный запуск двух копий программы в одной Windows-сессии, '
               'даже если они находятся в разных папках. Это защищает Telegram-сессию от конфликтующих соединений. '
               'Технические сетевые предупреждения Telethon сохраняются в `logs`, а не выводятся в обычное меню.\n'
           )
-          marker = 'Во вложенных пунктах `0` отменяет незавершённый ввод и возвращает в главное меню без изменения уже сохранённого списка каналов.\n'
-          if command_note.strip() not in readme:
+          if note.strip() not in readme:
               if marker not in readme:
                   raise SystemExit('README command marker not found')
-              readme = readme.replace(marker, marker + command_note, 1)
+              readme = readme.replace(marker, marker + note, 1)
           readme_path.write_text(readme, encoding='utf-8')
 
           ci_path = Path('.github/workflows/ci.yml')
