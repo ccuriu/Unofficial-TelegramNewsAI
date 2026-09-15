@@ -28,28 +28,29 @@ jobs:
         shell: pwsh
         run: |
           @'
+          import textwrap
           from pathlib import Path
 
-          path = Path('telegram_collector_free.py')
-          text = path.read_text(encoding='utf-8')
+          def replace_block(text, start_marker, end_marker, replacement):
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f'Start marker not found: {start_marker!r}')
+              end = text.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit(f'End marker not found: {end_marker!r}')
+              return text[:start] + replacement.rstrip() + '\n\n' + text[end:]
 
-          old_public = '''    print("Несколько адресов — через запятую.")
-              print("0 — Назад (ничего не менять).")
+          source_path = Path('telegram_collector_free.py')
+          text = source_path.read_text(encoding='utf-8')
 
-              raw = input(
-                  "Введите канал или каналы: "
-              ).strip()
-
-              if is_back_command(raw):
-                  print("Добавление отменено.")
-                  return items
-
-              if not raw:
-                  print("Ничего не введено. Список не изменён.")
-                  return items
-          '''.replace('              ', '    ')
-
-          new_public = '''    print("Несколько адресов — через запятую.")
+          public_block = textwrap.dedent('''
+          async def prompt_add_public_channels(client, items):
+              print("\\nМожно добавить публичные каналы БЕЗ подписки.")
+              print("Поддерживаются:")
+              print("  @example_channel")
+              print("  https://t.me/example_channel")
+              print("  https://t.me/example_channel/12345")
+              print("Несколько адресов — через запятую.")
               print(
                   "Если нужные подписанные каналы уже выбраны выше, "
                   "повторять их номера здесь не нужно."
@@ -74,43 +75,55 @@ jobs:
                       "Продолжаю без дополнительных каналов."
                   )
                   return items
-          '''.replace('              ', '    ')
 
-          if old_public not in text:
-              raise SystemExit('Public channel prompt anchor not found')
-          text = text.replace(old_public, new_public, 1)
-
-          old_parse = '''def parse_number_selection(raw, maximum):
-              selected = set()
-              raw = (raw or "").replace(" ", "")
-
-              if not raw:
-                  return selected
+              added = 0
 
               for part in raw.split(","):
+                  part = part.strip()
                   if not part:
                       continue
 
-                  if "-" in part:
-                      a, b = part.split("-", 1)
-                      a, b = int(a), int(b)
+                  try:
+                      item = await resolve_public_channel(client, part)
 
-                      for n in range(min(a, b), max(a, b) + 1):
-                          if 1 <= n <= maximum:
-                              selected.add(n)
-                  else:
-                      n = int(part)
-                      if 1 <= n <= maximum:
-                          selected.add(n)
+                      if any(
+                          int(x["id"]) == int(item["id"])
+                          for x in items
+                      ):
+                          print(f"  Уже есть: {item['name']}")
+                          continue
 
-              return selected
-          '''.replace('              ', '')
+                      items.append(item)
+                      added += 1
 
-          new_parse = '''def looks_like_number_selection(raw):
+                      uname = item.get("username") or "без username"
+                      print(f"  Добавлен: {item['name']} (@{uname})")
+
+                  except Exception as e:
+                      print(f"  Не добавлен {part}: {e}")
+
+              items = dedupe_channel_items(items)
+
+              if added:
+                  save_selection(items)
+                  print(f"Добавлено новых каналов: {added}")
+
+              return items
+          ''').strip()
+
+          text = replace_block(
+              text,
+              'async def prompt_add_public_channels(client, items):\n',
+              'def print_selected_channels(items):\n',
+              public_block,
+          )
+
+          parser_block = textwrap.dedent(r'''
+          def looks_like_number_selection(raw):
               compact = (raw or "").replace(" ", "")
               return bool(
                   re.fullmatch(
-                      r"\\d+(?:-\\d+)?(?:,\\d+(?:-\\d+)?)*",
+                      r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*",
                       compact,
                   )
               )
@@ -159,90 +172,61 @@ jobs:
                       selected.add(n)
 
               return selected
-          '''.replace('          ', '')
+          ''').strip()
 
-          if old_parse not in text:
-              raise SystemExit('Number selection parser anchor not found')
-          text = text.replace(old_parse, new_parse, 1)
+          text = replace_block(
+              text,
+              'def parse_number_selection(raw, maximum):\n',
+              'def prompt_remove_channels(items):\n',
+              parser_block,
+          )
 
-          old_remove_error = '''    except Exception:
-              print("Не удалось разобрать номера. Ничего не удалено.")
-              return items
-          '''.replace('              ', '    ')
-          new_remove_error = '''    except Exception as e:
-              print(f"Не удалось разобрать номера: {e}")
-              print("Ничего не удалено.")
-              return items
-          '''.replace('              ', '    ')
-          if old_remove_error not in text:
-              raise SystemExit('Remove selection error anchor not found')
-          text = text.replace(old_remove_error, new_remove_error, 1)
+          select_block = textwrap.dedent('''
+          async def select_from_subscriptions(client, subscribed):
+              print("\\nВаши подписанные каналы:")
 
-          old_select = '''    raw = input("Выбор: ").strip().lower()
-
-              if is_back_command(raw):
-                  print("Создание нового списка отменено.")
-                  return None
-
-              selected_nums = set()
-
-              if raw == "all":
-                  selected_nums = set(
-                      range(1, len(subscribed) + 1)
+              for i, dialog in enumerate(subscribed, 1):
+                  username = getattr(
+                      dialog.entity,
+                      "username",
+                      None,
                   )
-              else:
-                  try:
-                      selected_nums = parse_number_selection(
-                          raw,
-                          len(subscribed),
+                  suffix = f" @{username}" if username else ""
+                  print(f"{i:>4}. {dialog.name}{suffix}")
+
+              print("\\nВведите номера через запятую; диапазоны — через дефис.")
+              print("Пример: 1,3,7-12")
+              print("Можно написать all.")
+              print("0 — Назад (сохранить прежний список).")
+
+              while True:
+                  raw = input("Выбор: ").strip().lower()
+
+                  if is_back_command(raw):
+                      print("Создание нового списка отменено.")
+                      return None
+
+                  if raw == "all":
+                      selected_nums = set(
+                          range(1, len(subscribed) + 1)
                       )
-                  except Exception:
-                      print("Не удалось разобрать выбор.")
-                      selected_nums = set()
+                  else:
+                      try:
+                          selected_nums = parse_number_selection(
+                              raw,
+                              len(subscribed),
+                          )
+                      except Exception as e:
+                          print(f"Не удалось разобрать выбор: {e}")
+                          print("Введите номера ещё раз или 0 для выхода.")
+                          continue
 
-              items = [
-                  channel_item(
-                      subscribed[i - 1].entity,
-                      subscribed[i - 1].name,
-                  )
-                  for i in sorted(selected_nums)
-                  if 1 <= i <= len(subscribed)
-              ]
-
-              items = await prompt_add_public_channels(
-                  client,
-                  items,
-              )
-          '''.replace('              ', '    ')
-
-          new_select = '''    while True:
-              raw = input("Выбор: ").strip().lower()
-
-              if is_back_command(raw):
-                  print("Создание нового списка отменено.")
-                  return None
-
-              if raw == "all":
-                  selected_nums = set(
-                      range(1, len(subscribed) + 1)
-                  )
-              else:
-                  try:
-                      selected_nums = parse_number_selection(
-                          raw,
-                          len(subscribed),
-                      )
-                  except Exception as e:
-                      print(f"Не удалось разобрать выбор: {e}")
+                  if not selected_nums:
+                      print("Ни одного канала не выбрано.")
                       print("Введите номера ещё раз или 0 для выхода.")
                       continue
 
-              if not selected_nums:
-                  print("Ни одного канала не выбрано.")
-                  print("Введите номера ещё раз или 0 для выхода.")
-                  continue
-
-              break
+                  break
 
               items = [
                   channel_item(
@@ -259,38 +243,51 @@ jobs:
                       suffix = f" @{username}" if username else ""
                       print(f"  + {item['name']}{suffix}")
               else:
-                  print("Номера приняты. Список большой, поэтому названия не дублируются.")
+                  print(
+                      "Номера приняты. Список большой, "
+                      "поэтому названия не дублируются."
+                  )
 
               print(
                   "Эти каналы уже включены в новый список. "
-                  "Следующий шаг — только необязательное добавление публичных каналов без подписки."
+                  "Следующий шаг — только необязательное добавление "
+                  "публичных каналов без подписки."
               )
 
-              # Сохраняем уже подтверждённый выбор до необязательного второго шага.
+              # Сохраняем подтверждённый выбор до необязательного второго шага.
               save_selection(items)
 
               items = await prompt_add_public_channels(
                   client,
                   items,
               )
-          '''.replace('              ', '    ')
 
-          if old_select not in text:
-              raise SystemExit('Subscription selection anchor not found')
-          text = text.replace(old_select, new_select, 1)
-          path.write_text(text, encoding='utf-8')
+              items = dedupe_channel_items(items)
+              save_selection(items)
+              return items
+          ''').strip()
+
+          text = replace_block(
+              text,
+              'async def select_from_subscriptions(client, subscribed):\n',
+              'async def resolve_channels(\n',
+              select_block,
+          )
+
+          source_path.write_text(text, encoding='utf-8')
 
           tests_path = Path('tests/test_regressions.py')
           tests = tests_path.read_text(encoding='utf-8')
-          anchor = '    def test_numbers_are_not_near_duplicates(self):\n'
-          if anchor not in tests:
-              raise SystemExit('Test insertion anchor not found')
+          if 'def test_channel_number_range_selects_every_number' not in tests:
+              anchor = '    def test_numbers_are_not_near_duplicates(self):\n'
+              if anchor not in tests:
+                  raise SystemExit('Test insertion anchor not found')
 
-          addition = '''    def test_channel_number_range_selects_every_number(self):
-              self.assertEqual(
-                  collector.parse_number_selection("30-33", 40),
-                  {30, 31, 32, 33},
-              )
+              addition = '''    def test_channel_number_range_selects_every_number(self):
+                  self.assertEqual(
+                      collector.parse_number_selection("30-33", 40),
+                      {30, 31, 32, 33},
+                  )
 
               def test_channel_number_range_rejects_out_of_bounds(self):
                   with self.assertRaisesRegex(ValueError, "1-32"):
@@ -325,20 +322,20 @@ jobs:
                   self.assertIn("номера из списка подписок", printed)
                   self.assertIn("уже добавлены", printed)
 
-          '''.replace('              ', '    ')
-          tests = tests.replace(anchor, addition + anchor, 1)
-          tests_path.write_text(tests, encoding='utf-8')
+          '''
+              tests = tests.replace(anchor, addition + anchor, 1)
+              tests_path.write_text(tests, encoding='utf-8')
 
           readme_path = Path('README.md')
           readme = readme_path.read_text(encoding='utf-8')
-          marker = '- `N` — создать список каналов заново;\n'
           note = (
-              'При создании списка номера и диапазоны (например `30-33`) относятся к показанному списку подписок. '
-              'После подтверждения эти каналы уже выбраны; на следующем необязательном шаге вводятся только '
-              '`@username` или ссылки `t.me`. Чтобы ничего дополнительно не добавлять, достаточно нажать `Enter` или `0`.\n'
+              'При создании нового списка номера и диапазоны, например `30-33`, относятся к показанному списку подписок. '
+              'После подтверждения эти каналы уже выбраны. На следующем необязательном шаге вводятся только '
+              '`@username` или ссылки `t.me`; если добавлять такие каналы не нужно, нажмите `Enter` или `0`.\n\n'
           )
+          marker = 'Во всех вложенных запросах `0` отменяет незавершённый ввод и возвращает в главное меню без изменения сохранённого списка каналов.\n'
           if note not in readme and marker in readme:
-              readme = readme.replace(marker, marker + note, 1)
+              readme = readme.replace(marker, marker + '\n' + note, 1)
               readme_path.write_text(readme, encoding='utf-8')
           '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\patch.py" -Encoding utf8
           python "$env:RUNNER_TEMP\patch.py"
