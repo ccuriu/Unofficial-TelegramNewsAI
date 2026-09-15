@@ -145,6 +145,45 @@ class OfflineRegressionTests(unittest.TestCase):
             printed,
         )
 
+    def test_channel_number_range_selects_every_number(self):
+        self.assertEqual(
+            collector.parse_number_selection("30-33", 40),
+            {30, 31, 32, 33},
+        )
+
+    def test_channel_number_range_rejects_out_of_bounds(self):
+        with self.assertRaisesRegex(ValueError, "1-32"):
+            collector.parse_number_selection("30-33", 32)
+
+    def test_public_channel_prompt_does_not_reparse_number_range(self):
+        existing = [
+            {"id": 30, "name": "Thirty", "username": "thirty"},
+            {"id": 31, "name": "Thirty One", "username": "thirty_one"},
+        ]
+
+        with patch("builtins.input", return_value="30-33"):
+            with patch.object(
+                collector,
+                "resolve_public_channel",
+            ) as mocked_resolve:
+                with patch("builtins.print") as mocked_print:
+                    result = asyncio.run(
+                        collector.prompt_add_public_channels(
+                            object(),
+                            list(existing),
+                        )
+                    )
+
+        self.assertEqual(result, existing)
+        mocked_resolve.assert_not_awaited()
+        printed = " ".join(
+            str(argument)
+            for call in mocked_print.call_args_list
+            for argument in call.args
+        )
+        self.assertIn("номера из списка подписок", printed)
+        self.assertIn("уже добавлены", printed)
+
     def test_numbers_are_not_near_duplicates(self):
         prefix = "Подробная публикация о результатах проверки. " * 6
         kept, exact, near = self.collapse(prefix + "15 нарушений", prefix + "16 нарушений")

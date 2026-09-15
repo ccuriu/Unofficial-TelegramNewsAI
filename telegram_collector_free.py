@@ -618,18 +618,29 @@ async def prompt_add_public_channels(client, items):
     print("  https://t.me/example_channel")
     print("  https://t.me/example_channel/12345")
     print("Несколько адресов — через запятую.")
-    print("0 — Назад (ничего не менять).")
+    print(
+        "Если нужные подписанные каналы уже выбраны выше, "
+        "повторять их номера здесь не нужно."
+    )
+    print("Enter или 0 — Готово, продолжить без добавления.")
 
     raw = input(
-        "Введите канал или каналы: "
+        "Введите публичный канал(ы) или нажмите Enter: "
     ).strip()
 
-    if is_back_command(raw):
-        print("Добавление отменено.")
+    if is_back_command(raw) or not raw:
+        print("Дополнительные публичные каналы не добавлялись.")
         return items
 
-    if not raw:
-        print("Ничего не введено. Список не изменён.")
+    if looks_like_number_selection(raw):
+        print(
+            "Это похоже на номера из списка подписок. "
+            "Выбранные там каналы уже добавлены."
+        )
+        print(
+            "Здесь вводятся только @username или ссылки t.me. "
+            "Продолжаю без дополнительных каналов."
+        )
         return items
 
     added = 0
@@ -666,7 +677,6 @@ async def prompt_add_public_channels(client, items):
 
     return items
 
-
 def print_selected_channels(items):
     print("\nТекущий список каналов:")
     if not items:
@@ -679,6 +689,16 @@ def print_selected_channels(items):
         print(f"{i:>4}. {item['name']}{suffix}")
 
 
+def looks_like_number_selection(raw):
+    compact = (raw or "").replace(" ", "")
+    return bool(
+        re.fullmatch(
+            r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*",
+            compact,
+        )
+    )
+
+
 def parse_number_selection(raw, maximum):
     selected = set()
     raw = (raw or "").replace(" ", "")
@@ -686,24 +706,42 @@ def parse_number_selection(raw, maximum):
     if not raw:
         return selected
 
+    if maximum < 1:
+        raise ValueError("Список каналов пуст.")
+
     for part in raw.split(","):
         if not part:
-            continue
+            raise ValueError("Обнаружен пустой номер.")
 
         if "-" in part:
-            a, b = part.split("-", 1)
-            a, b = int(a), int(b)
+            if part.count("-") != 1:
+                raise ValueError(f"Некорректный диапазон: {part}")
 
-            for n in range(min(a, b), max(a, b) + 1):
-                if 1 <= n <= maximum:
-                    selected.add(n)
+            a_text, b_text = part.split("-", 1)
+            if not a_text.isdigit() or not b_text.isdigit():
+                raise ValueError(f"Некорректный диапазон: {part}")
+
+            a, b = int(a_text), int(b_text)
+            if not (1 <= a <= maximum and 1 <= b <= maximum):
+                raise ValueError(
+                    f"Диапазон {part} выходит за пределы списка 1-{maximum}."
+                )
+
+            selected.update(
+                range(min(a, b), max(a, b) + 1)
+            )
         else:
+            if not part.isdigit():
+                raise ValueError(f"Некорректный номер: {part}")
+
             n = int(part)
-            if 1 <= n <= maximum:
-                selected.add(n)
+            if not 1 <= n <= maximum:
+                raise ValueError(
+                    f"Номер {n} вне списка 1-{maximum}."
+                )
+            selected.add(n)
 
     return selected
-
 
 def prompt_remove_channels(items):
     if not items:
@@ -776,27 +814,34 @@ async def select_from_subscriptions(client, subscribed):
     print("Можно написать all.")
     print("0 — Назад (сохранить прежний список).")
 
-    raw = input("Выбор: ").strip().lower()
+    while True:
+        raw = input("Выбор: ").strip().lower()
 
-    if is_back_command(raw):
-        print("Создание нового списка отменено.")
-        return None
+        if is_back_command(raw):
+            print("Создание нового списка отменено.")
+            return None
 
-    selected_nums = set()
-
-    if raw == "all":
-        selected_nums = set(
-            range(1, len(subscribed) + 1)
-        )
-    else:
-        try:
-            selected_nums = parse_number_selection(
-                raw,
-                len(subscribed),
+        if raw == "all":
+            selected_nums = set(
+                range(1, len(subscribed) + 1)
             )
-        except Exception:
-            print("Не удалось разобрать выбор.")
-            selected_nums = set()
+        else:
+            try:
+                selected_nums = parse_number_selection(
+                    raw,
+                    len(subscribed),
+                )
+            except Exception as e:
+                print(f"Не удалось разобрать выбор: {e}")
+                print("Введите номера ещё раз или 0 для выхода.")
+                continue
+
+        if not selected_nums:
+            print("Ни одного канала не выбрано.")
+            print("Введите номера ещё раз или 0 для выхода.")
+            continue
+
+        break
 
     items = [
         channel_item(
@@ -804,8 +849,28 @@ async def select_from_subscriptions(client, subscribed):
             subscribed[i - 1].name,
         )
         for i in sorted(selected_nums)
-        if 1 <= i <= len(subscribed)
     ]
+
+    print(f"\nВыбрано подписанных каналов: {len(items)}")
+    if len(items) <= 20:
+        for item in items:
+            username = item.get("username")
+            suffix = f" @{username}" if username else ""
+            print(f"  + {item['name']}{suffix}")
+    else:
+        print(
+            "Номера приняты. Список большой, "
+            "поэтому названия не дублируются."
+        )
+
+    print(
+        "Эти каналы уже включены в новый список. "
+        "Следующий шаг — только необязательное добавление "
+        "публичных каналов без подписки."
+    )
+
+    # Сохраняем подтверждённый выбор до необязательного второго шага.
+    save_selection(items)
 
     items = await prompt_add_public_channels(
         client,
@@ -815,7 +880,6 @@ async def select_from_subscriptions(client, subscribed):
     items = dedupe_channel_items(items)
     save_selection(items)
     return items
-
 
 async def resolve_channels(
     client,
