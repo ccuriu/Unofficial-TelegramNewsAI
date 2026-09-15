@@ -155,6 +155,90 @@ class OfflineRegressionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "1-32"):
             collector.parse_number_selection("30-33", 32)
 
+    def test_mixed_channel_selection_accepts_numbers_ranges_and_links(self):
+        selected, public_values = collector.parse_mixed_channel_selection(
+            "3,7-10,12-36,https://t.me/durov,@insiderUKR",
+            40,
+        )
+        expected = {3, 7, 8, 9, 10} | set(range(12, 37))
+        self.assertEqual(selected, expected)
+        self.assertEqual(
+            public_values,
+            ["https://t.me/durov", "@insiderUKR"],
+        )
+
+    def test_mixed_channel_selection_accepts_all_plus_public_link(self):
+        selected, public_values = collector.parse_mixed_channel_selection(
+            "all,https://t.me/example_channel",
+            3,
+        )
+        self.assertEqual(selected, {1, 2, 3})
+        self.assertEqual(
+            public_values,
+            ["https://t.me/example_channel"],
+        )
+
+    def test_mixed_channel_selection_rejects_out_of_bounds_range(self):
+        with self.assertRaisesRegex(ValueError, "1-35"):
+            collector.parse_mixed_channel_selection(
+                "3,12-36,https://t.me/durov",
+                35,
+            )
+
+    def test_subscription_selection_resolves_link_from_same_input(self):
+        subscribed = [
+            SimpleNamespace(
+                name="One",
+                entity=SimpleNamespace(id=1, username="one"),
+            ),
+            SimpleNamespace(
+                name="Two",
+                entity=SimpleNamespace(id=2, username="two"),
+            ),
+            SimpleNamespace(
+                name="Three",
+                entity=SimpleNamespace(id=3, username="three"),
+            ),
+        ]
+        public = {
+            "id": 99,
+            "name": "Public",
+            "username": "public_channel",
+            "entity": SimpleNamespace(id=99, username="public_channel"),
+        }
+        client = object()
+
+        with patch(
+            "builtins.input",
+            return_value="1,3,https://t.me/public_channel",
+        ):
+            with patch.object(
+                collector,
+                "resolve_public_channel",
+                AsyncMock(return_value=public),
+            ) as mocked_resolve:
+                with patch.object(
+                    collector,
+                    "prompt_add_public_channels",
+                    AsyncMock(side_effect=lambda _client, items: items),
+                ):
+                    with patch.object(collector, "save_selection"):
+                        result = asyncio.run(
+                            collector.select_from_subscriptions(
+                                client,
+                                subscribed,
+                            )
+                        )
+
+        self.assertEqual(
+            [int(item["id"]) for item in result],
+            [1, 3, 99],
+        )
+        mocked_resolve.assert_awaited_once_with(
+            client,
+            "https://t.me/public_channel",
+        )
+
     def test_public_channel_prompt_does_not_reparse_number_range(self):
         existing = [
             {"id": 30, "name": "Thirty", "username": "thirty"},

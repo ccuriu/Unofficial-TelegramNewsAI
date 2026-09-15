@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.8 Stable"
+APP_VERSION = "5.4.9 Stable"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -753,6 +753,44 @@ def parse_number_selection(raw, maximum):
 
     return selected
 
+def parse_mixed_channel_selection(raw, maximum):
+    """Разбирает одну строку с номерами/диапазонами и Telegram-адресами."""
+    selected = set()
+    public_values = []
+    raw = str(raw or "").strip()
+
+    if not raw:
+        return selected, public_values
+
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError("Обнаружен пустой элемент выбора.")
+
+        if part.casefold() == "all":
+            if maximum < 1:
+                raise ValueError("Список подписанных каналов пуст.")
+            selected.update(range(1, maximum + 1))
+            continue
+
+        compact = part.replace(" ", "")
+        if re.fullmatch(r"\d+(?:-\d+)?", compact):
+            selected.update(
+                parse_number_selection(compact, maximum)
+            )
+            continue
+
+        if normalize_public_channel_input(part):
+            public_values.append(part)
+            continue
+
+        raise ValueError(
+            f"Не удалось распознать элемент: {part}"
+        )
+
+    return selected, unique_keep_order(public_values)
+
+
 def prompt_remove_channels(items):
     if not items:
         print("\nСписок уже пуст.")
@@ -820,66 +858,107 @@ async def select_from_subscriptions(client, subscribed):
         print(f"{i:>4}. {dialog.name}{suffix}")
 
     print("\nВведите номера через запятую; диапазоны — через дефис.")
-    print("Пример: 1,3,7-12")
-    print("Можно написать all.")
+    print("В этой же строке можно указывать @username и ссылки t.me.")
+    print("Пример: 1,3,7-12,https://t.me/example_channel")
+    print("Можно написать all или, например, all,@example_channel.")
     print("0 — Назад (сохранить прежний список).")
 
     while True:
-        raw = input("Выбор: ").strip().lower()
+        raw = input("Выбор: ").strip()
 
         if is_back_command(raw):
             print("Создание нового списка отменено.")
             return None
 
-        if raw == "all":
-            selected_nums = set(
-                range(1, len(subscribed) + 1)
+        try:
+            selected_nums, public_values = parse_mixed_channel_selection(
+                raw,
+                len(subscribed),
             )
-        else:
-            try:
-                selected_nums = parse_number_selection(
-                    raw,
-                    len(subscribed),
-                )
-            except Exception as e:
-                print(f"Не удалось разобрать выбор: {e}")
-                print("Введите номера ещё раз или 0 для выхода.")
-                continue
+        except Exception as e:
+            print(f"Не удалось разобрать выбор: {e}")
+            print(
+                "Введите номера, диапазоны, @username или ссылки t.me "
+                "ещё раз; 0 — выход."
+            )
+            continue
 
-        if not selected_nums:
+        if not selected_nums and not public_values:
             print("Ни одного канала не выбрано.")
-            print("Введите номера ещё раз или 0 для выхода.")
+            print("Введите выбор ещё раз или 0 для выхода.")
+            continue
+
+        items = [
+            channel_item(
+                subscribed[i - 1].entity,
+                subscribed[i - 1].name,
+            )
+            for i in sorted(selected_nums)
+        ]
+
+        if public_values:
+            print("\nДобавляю публичные каналы из этой же строки:")
+            for raw_value in public_values:
+                try:
+                    item = await resolve_public_channel(
+                        client,
+                        raw_value,
+                    )
+                except Exception as e:
+                    print(f"  Не добавлен {raw_value}: {e}")
+                    continue
+
+                if any(
+                    int(existing["id"]) == int(item["id"])
+                    for existing in items
+                ):
+                    print(f"  Уже есть: {item['name']}")
+                    continue
+
+                items.append(item)
+                uname = item.get("username") or "без username"
+                print(
+                    f"  Добавлен: {item['name']} (@{uname})"
+                )
+
+        items = dedupe_channel_items(items)
+        if not items:
+            print("Не удалось добавить ни одного канала.")
+            print("Введите выбор ещё раз или 0 для выхода.")
             continue
 
         break
 
-    items = [
-        channel_item(
-            subscribed[i - 1].entity,
-            subscribed[i - 1].name,
-        )
-        for i in sorted(selected_nums)
-    ]
-
-    print(f"\nВыбрано подписанных каналов: {len(items)}")
-    if len(items) <= 20:
-        for item in items:
+    print(
+        f"\nВыбрано подписанных каналов: {len(selected_nums)}"
+    )
+    if selected_nums and len(selected_nums) <= 20:
+        for i in sorted(selected_nums):
+            item = channel_item(
+                subscribed[i - 1].entity,
+                subscribed[i - 1].name,
+            )
             username = item.get("username")
             suffix = f" @{username}" if username else ""
             print(f"  + {item['name']}{suffix}")
-    else:
+    elif len(selected_nums) > 20:
         print(
             "Номера приняты. Список большой, "
             "поэтому названия не дублируются."
         )
 
+    public_count = len(items) - len(selected_nums)
+    if public_count > 0:
+        print(
+            f"Добавлено публичных каналов из строки: {public_count}"
+        )
+
     print(
         "Эти каналы уже включены в новый список. "
         "Следующий шаг — только необязательное добавление "
-        "публичных каналов без подписки."
+        "ещё публичных каналов без подписки."
     )
 
-    # Сохраняем подтверждённый выбор до необязательного второго шага.
     save_selection(items)
 
     items = await prompt_add_public_channels(
@@ -890,6 +969,7 @@ async def select_from_subscriptions(client, subscribed):
     items = dedupe_channel_items(items)
     save_selection(items)
     return items
+
 
 async def resolve_channels(
     client,
