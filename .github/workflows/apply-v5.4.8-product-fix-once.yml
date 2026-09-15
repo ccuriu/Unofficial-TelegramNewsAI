@@ -52,20 +52,9 @@ jobs:
 
           path = Path('telegram_collector_free.py')
           text = path.read_text(encoding='utf-8')
-          old = '''            if mode in channel_action_aliases:
-              client, creds = await ensure_telegram_client(
-                  client,
-                  creds,
-                  settings,
-              )
-
-              await resolve_channels(
-                  client,
-                  initial_action=channel_action_aliases[mode],
-                  return_after_initial=True,
-                  skip_menu=False,
-              )
-          '''.replace('              ', '    ')
+          start_marker = '            if mode in channel_action_aliases:\n'
+          start = text.index(start_marker)
+          end = text.index('                print(', start)
           new = '''            if mode in channel_action_aliases:
               channel_action = channel_action_aliases[mode]
 
@@ -85,9 +74,7 @@ jobs:
                   skip_menu=False,
               )
           '''.replace('              ', '    ')
-          if old not in text:
-              raise SystemExit('Main channel action anchor not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          path.write_text(text[:start] + new + text[end:], encoding='utf-8')
           '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\local_menu.py" -Encoding utf8
           python "$env:RUNNER_TEMP\local_menu.py"
 
