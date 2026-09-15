@@ -112,9 +112,9 @@ jobs:
       - name: Upload verified release files
         uses: actions/upload-artifact@v7
         with:
-          name: TelegramNewsAI-5.4.8-Stable-Windows
+          name: TelegramNewsAI-Stable-Windows
           path: |
-            ${{ runner.temp }}/release/TelegramNewsAI-5.4.8-Stable-Windows.zip
-            ${{ runner.temp }}/release/TelegramNewsAI-5.4.8-Stable-Windows.sha256.txt
+            ${{ runner.temp }}/release/*.zip
+            ${{ runner.temp }}/release/*.sha256.txt
           if-no-files-found: error
           retention-days: 30
