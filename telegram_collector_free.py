@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.7 Stable"
+APP_VERSION = "5.4.8 Stable"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -238,18 +238,28 @@ def load_settings():
 def setup_logging():
     ensure_dirs()
     log_path = LOG_DIR / f"collector_{datetime.now().strftime('%Y-%m-%d')}.log"
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        "%Y-%m-%d %H:%M:%S",
+    )
 
     logger = logging.getLogger("TelegramNewsAI")
     logger.setLevel(logging.INFO)
-
     if not logger.handlers:
         handler = logging.FileHandler(log_path, encoding="utf-8")
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(message)s",
-            "%Y-%m-%d %H:%M:%S",
-        )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+
+    # Telethon пишет сетевые предупреждения через logging. Без своего
+    # обработчика Python отправляет WARNING/ERROR прямо в консоль,
+    # хотя библиотека часто сама восстанавливает соединение.
+    telethon_logger = logging.getLogger("telethon")
+    telethon_logger.setLevel(logging.WARNING)
+    telethon_logger.propagate = False
+    if not telethon_logger.handlers:
+        telethon_handler = logging.FileHandler(log_path, encoding="utf-8")
+        telethon_handler.setFormatter(formatter)
+        telethon_logger.addHandler(telethon_handler)
 
     return logger
 
@@ -896,6 +906,27 @@ async def resolve_channels(
     initial_action=A/R/L/N:
         выполняет выбранную в главном меню операцию управления каналами.
     """
+    pending_action = (
+        str(initial_action).strip().lower()
+        if initial_action
+        else None
+    )
+
+    # A/R/L работают с уже сохранённым списком и не требуют полного
+    # чтения подписок. A обращается к Telegram только за новым каналом.
+    if pending_action in ("a", "r", "l"):
+        restored = dedupe_channel_items(load_selection())
+
+        if pending_action == "a":
+            restored = await prompt_add_public_channels(client, restored)
+        elif pending_action == "r":
+            restored = prompt_remove_channels(restored)
+        else:
+            print_selected_channels(restored)
+
+        save_selection(restored)
+        return restored
+
     print("\nПолучаю список ваших подписок...")
     dialogs = await client.get_dialogs(limit=None)
 
@@ -932,12 +963,6 @@ async def resolve_channels(
     # Обычный дайджест: никаких лишних меню.
     if skip_menu and not initial_action:
         return restored
-
-    pending_action = (
-        str(initial_action).strip().lower()
-        if initial_action
-        else None
-    )
 
     while True:
         if pending_action:
@@ -5741,15 +5766,20 @@ async def _v4_main():
             }
 
             if mode in channel_action_aliases:
-                client, creds = await ensure_telegram_client(
-                    client,
-                    creds,
-                    settings,
-                )
+                channel_action = channel_action_aliases[mode]
+
+                # Только добавление публичного канала и пересоздание списка
+                # требуют Telegram. Просмотр и удаление работают локально.
+                if channel_action in ("a", "n"):
+                    client, creds = await ensure_telegram_client(
+                        client,
+                        creds,
+                        settings,
+                    )
 
                 await resolve_channels(
                     client,
-                    initial_action=channel_action_aliases[mode],
+                    initial_action=channel_action,
                     return_after_initial=True,
                     skip_menu=False,
                 )
@@ -6154,19 +6184,52 @@ async def _v4_main():
 # Version 5: safe migration, history, retrieval and local viewer
 # ============================================================
 
+\
 class InstanceLock:
-    """A kernel-owned byte lock, released even after a crash."""
+    """Single-instance guard released automatically even after a crash."""
+
+    GLOBAL_MUTEX_NAME = r"Local\TelegramNewsAI.SingleInstance"
+    ERROR_ALREADY_EXISTS = 183
+
     def __init__(self, path=None):
+        self.explicit_path = path is not None
         self.path = Path(path or APP_DIR / 'collector.lock')
         self.file = None
+        self.mutex_handle = None
 
     def __enter__(self):
+        # Обычный Windows-запуск использует именованный kernel mutex.
+        # Он блокирует вторую копию даже из другой папки установки.
+        if os.name == 'nt' and not self.explicit_path:
+            kernel32 = ctypes.windll.kernel32
+            create_mutex = kernel32.CreateMutexW
+            create_mutex.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+            create_mutex.restype = wintypes.HANDLE
+
+            handle = create_mutex(None, False, self.GLOBAL_MUTEX_NAME)
+            if not handle:
+                raise ctypes.WinError()
+
+            error = kernel32.GetLastError()
+            if error == self.ERROR_ALREADY_EXISTS:
+                kernel32.CloseHandle(handle)
+                raise RuntimeError(
+                    'TelegramNewsAI уже запущен в другом окне или из другой папки. '
+                    'Закройте предыдущий экземпляр и повторите запуск.'
+                )
+
+            self.mutex_handle = handle
+            return self
+
+        # Явный path сохраняет прежнюю файловую блокировку для
+        # тестов/служебных сценариев и для не-Windows платформ.
         self.file = self.path.open('a+b')
         self.file.seek(0, 2)
         if self.file.tell() == 0:
             self.file.write(b'0')
             self.file.flush()
         self.file.seek(0)
+
         try:
             if os.name == 'nt':
                 import msvcrt
@@ -6177,10 +6240,15 @@ class InstanceLock:
         except OSError:
             self.file.close()
             self.file = None
-            raise RuntimeError('Программа уже открыта. Завершите предыдущий сбор и повторите запуск.')
+            raise RuntimeError(
+                'Программа уже открыта. Завершите предыдущий сбор и повторите запуск.'
+            )
         return self
 
     def __exit__(self, *args):
+        if self.mutex_handle:
+            ctypes.windll.kernel32.CloseHandle(self.mutex_handle)
+            self.mutex_handle = None
         if self.file:
             self.file.close()
             self.file = None

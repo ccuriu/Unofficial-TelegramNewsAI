@@ -6,7 +6,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -183,6 +183,41 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         self.assertIn("номера из списка подписок", printed)
         self.assertIn("уже добавлены", printed)
+
+    def test_channel_add_does_not_fetch_all_subscriptions(self):
+        existing = [{"id": 10, "name": "Saved", "username": "saved_channel"}]
+        client = SimpleNamespace(get_dialogs=AsyncMock())
+
+        with patch.object(collector, "load_selection", return_value=list(existing)):
+            with patch.object(collector, "save_selection") as mocked_save:
+                with patch.object(
+                    collector,
+                    "prompt_add_public_channels",
+                    AsyncMock(return_value=list(existing)),
+                ):
+                    result = asyncio.run(
+                        collector.resolve_channels(
+                            client,
+                            initial_action="a",
+                            return_after_initial=True,
+                        )
+                    )
+
+        self.assertEqual(result, existing)
+        client.get_dialogs.assert_not_awaited()
+        mocked_save.assert_called_once_with(existing)
+
+    @unittest.skipUnless(collector.os.name == "nt", "Windows named mutex")
+    def test_default_instance_lock_blocks_second_copy_across_folders(self):
+        with collector.InstanceLock():
+            original_app_dir = collector.APP_DIR
+            try:
+                collector.APP_DIR = self.directory / "other-copy"
+                with self.assertRaisesRegex(RuntimeError, "уже запущен"):
+                    with collector.InstanceLock():
+                        pass
+            finally:
+                collector.APP_DIR = original_app_dir
 
     def test_numbers_are_not_near_duplicates(self):
         prefix = "Подробная публикация о результатах проверки. " * 6
