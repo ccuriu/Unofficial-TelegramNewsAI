@@ -261,7 +261,7 @@ jobs:
               client.get_dialogs.assert_not_awaited()
               mocked_save.assert_called_once_with(existing)
 
-          @unittest.skipUnless(os.name == "nt", "Windows named mutex")
+          @unittest.skipUnless(collector.os.name == "nt", "Windows named mutex")
           def test_default_instance_lock_blocks_second_copy_across_folders(self):
               with collector.InstanceLock():
                   original_app_dir = collector.APP_DIR
