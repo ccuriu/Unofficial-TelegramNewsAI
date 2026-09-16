@@ -1,0 +1,212 @@
+name: Fix stale channel metadata once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-stale-channel-metadata-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Apply focused repair
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from textwrap import dedent, indent
+
+          source_path = Path('telegram_collector_free.py')
+          text = source_path.read_text(encoding='utf-8')
+
+          old_version = 'APP_VERSION = "5.4.9 Stable"'
+          if old_version not in text:
+              raise SystemExit('APP_VERSION anchor not found')
+          text = text.replace(old_version, 'APP_VERSION = "5.4.10 Stable"', 1)
+
+          helper_anchor = '\n\nasync def restore_saved_selection(client, subscribed_by_id):\n'
+          if helper_anchor not in text:
+              raise SystemExit('restore_saved_selection anchor not found')
+
+          helper = dedent('''\
+          def merge_resolved_channel(items, fresh_item):
+              """Добавляет новый канал или освежает метаданные уже сохранённого."""
+              channel_id = int(fresh_item["id"])
+
+              for index, existing in enumerate(items):
+                  if int(existing["id"]) != channel_id:
+                      continue
+
+                  merged = dict(existing)
+                  changed = False
+
+                  for key in ("name", "username"):
+                      value = fresh_item.get(key)
+                      if value and merged.get(key) != value:
+                          merged[key] = value
+                          changed = True
+
+                  # entity нужен только в текущем процессе; save_selection его не пишет.
+                  if fresh_item.get("entity") is not None:
+                      merged["entity"] = fresh_item["entity"]
+
+                  items[index] = merged
+                  return items, False, changed
+
+              items.append(fresh_item)
+              return items, True, False
+
+
+          ''')
+          if 'def merge_resolved_channel(' not in text:
+              text = text.replace(helper_anchor, '\n\n' + helper + 'async def restore_saved_selection(client, subscribed_by_id):\n', 1)
+
+          old_block = '''            if any(\n                int(x["id"]) == int(item["id"])\n                for x in items\n            ):\n                print(f"  Уже есть: {item['name']}")\n                continue\n\n            items.append(item)\n            added += 1\n\n            uname = item.get("username") or "без username"\n            print(f"  Добавлен: {item['name']} (@{uname})")\n'''
+          new_block = '''            items, was_added, was_updated = merge_resolved_channel(\n                items,\n                item,\n            )\n\n            uname = item.get("username") or "без username"\n            if was_added:\n                added += 1\n                print(f"  Добавлен: {item['name']} (@{uname})")\n            elif was_updated:\n                updated += 1\n                print(f"  Обновлён: {item['name']} (@{uname})")\n            else:\n                print(f"  Уже есть: {item['name']}")\n'''
+          if old_block not in text:
+              raise SystemExit('prompt_add duplicate block not found')
+          text = text.replace(old_block, new_block, 1)
+
+          old_added = '    added = 0\n\n    for part in raw.split(","):'
+          new_added = '    added = 0\n    updated = 0\n\n    for part in raw.split(","):'
+          if old_added not in text:
+              raise SystemExit('added counter anchor not found')
+          text = text.replace(old_added, new_added, 1)
+
+          old_save = '''    if added:\n        save_selection(items)\n        print(f"Добавлено новых каналов: {added}")\n\n    return items\n'''
+          new_save = '''    if added or updated:\n        save_selection(items)\n    if added:\n        print(f"Добавлено новых каналов: {added}")\n    if updated:\n        print(f"Обновлено сохранённых каналов: {updated}")\n\n    return items\n'''
+          if old_save not in text:
+              raise SystemExit('prompt_add save block not found')
+          text = text.replace(old_save, new_save, 1)
+
+          # В смешанном вводе применяем ту же логику, чтобы дубль по ID тоже освежал username.
+          old_mixed = '''                if any(\n                    int(existing["id"]) == int(item["id"])\n                    for existing in items\n                ):\n                    print(f"  Уже есть: {item['name']}")\n                    continue\n\n                items.append(item)\n                uname = item.get("username") or "без username"\n                print(\n                    f"  Добавлен: {item['name']} (@{uname})"\n                )\n'''
+          new_mixed = '''                items, was_added, was_updated = merge_resolved_channel(\n                    items,\n                    item,\n                )\n                uname = item.get("username") or "без username"\n                if was_added:\n                    print(\n                        f"  Добавлен: {item['name']} (@{uname})"\n                    )\n                elif was_updated:\n                    print(\n                        f"  Обновлён: {item['name']} (@{uname})"\n                    )\n                else:\n                    print(f"  Уже есть: {item['name']}")\n'''
+          if old_mixed not in text:
+              raise SystemExit('mixed duplicate block not found')
+          text = text.replace(old_mixed, new_mixed, 1)
+
+          source_path.write_text(text, encoding='utf-8')
+
+          tests_path = Path('tests/test_regressions.py')
+          tests = tests_path.read_text(encoding='utf-8')
+          anchor = '    def test_channel_add_does_not_fetch_all_subscriptions(self):\n'
+          if anchor not in tests:
+              raise SystemExit('test anchor not found')
+
+          method = dedent('''\
+          def test_readding_public_channel_repairs_stale_saved_username(self):
+              existing = [
+                  {"id": 99, "name": "Pavel Durov", "username": None}
+              ]
+              fresh = {
+                  "id": 99,
+                  "name": "Pavel Durov",
+                  "username": "durov",
+                  "entity": SimpleNamespace(id=99, username="durov"),
+              }
+
+              with patch("builtins.input", return_value="https://t.me/durov"):
+                  with patch.object(
+                      collector,
+                      "resolve_public_channel",
+                      AsyncMock(return_value=fresh),
+                  ):
+                      with patch.object(collector, "save_selection") as mocked_save:
+                          with patch("builtins.print") as mocked_print:
+                              result = asyncio.run(
+                                  collector.prompt_add_public_channels(
+                                      object(),
+                                      list(existing),
+                                  )
+                              )
+
+              self.assertEqual(len(result), 1)
+              self.assertEqual(result[0]["id"], 99)
+              self.assertEqual(result[0]["username"], "durov")
+              mocked_save.assert_called_once()
+              saved = mocked_save.call_args.args[0]
+              self.assertEqual(saved[0]["username"], "durov")
+              printed = " ".join(
+                  str(argument)
+                  for call in mocked_print.call_args_list
+                  for argument in call.args
+              )
+              self.assertIn("Обновлён: Pavel Durov (@durov)", printed)
+              self.assertIn("Обновлено сохранённых каналов: 1", printed)
+
+          def test_merge_resolved_channel_keeps_single_item_and_refreshes_name(self):
+              existing = [{"id": 7, "name": "Old", "username": "channel"}]
+              fresh = {
+                  "id": 7,
+                  "name": "New name",
+                  "username": "channel",
+                  "entity": object(),
+              }
+              result, added, updated = collector.merge_resolved_channel(
+                  list(existing),
+                  fresh,
+              )
+              self.assertFalse(added)
+              self.assertTrue(updated)
+              self.assertEqual(len(result), 1)
+              self.assertEqual(result[0]["name"], "New name")
+
+          ''')
+          addition = indent(method, '    ')
+          if 'def test_readding_public_channel_repairs_stale_saved_username' not in tests:
+              tests = tests.replace(anchor, addition + anchor, 1)
+          tests_path.write_text(tests, encoding='utf-8')
+
+          readme_path = Path('README.md')
+          readme = readme_path.read_text(encoding='utf-8')
+          readme = readme.replace(
+              '![Release](https://img.shields.io/badge/release-5.4.9%20Stable-blue)',
+              '![Release](https://img.shields.io/badge/release-5.4.10%20Stable-blue)',
+              1,
+          )
+          readme_path.write_text(readme, encoding='utf-8')
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\patch.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\patch.py"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile-check
+        run: python -m py_compile telegram_collector_free.py
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build release candidate
+        shell: pwsh
+        run: |
+          .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+          if (-not (Test-Path "$env:RUNNER_TEMP\release\TelegramNewsAI-5.4.10-Stable-Windows.zip")) { throw '5.4.10 ZIP missing' }
+
+      - name: Commit repair
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add telegram_collector_free.py tests/test_regressions.py README.md
+          if (git diff --cached --quiet) { throw 'Patch produced no changes.' }
+          git commit -m "fix: refresh stale saved channel metadata"
+          git push origin HEAD:main
