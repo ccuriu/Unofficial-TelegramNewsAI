@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.9 Stable"
+APP_VERSION = "5.4.10 Stable"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -581,6 +581,34 @@ def dedupe_channel_items(items):
     return result
 
 
+def merge_resolved_channel(items, fresh_item):
+    """Добавляет новый канал или освежает метаданные уже сохранённого."""
+    channel_id = int(fresh_item["id"])
+
+    for index, existing in enumerate(items):
+        if int(existing["id"]) != channel_id:
+            continue
+
+        merged = dict(existing)
+        changed = False
+
+        for key in ("name", "username"):
+            value = fresh_item.get(key)
+            if value and merged.get(key) != value:
+                merged[key] = value
+                changed = True
+
+        # entity нужен только в текущем процессе; save_selection его не пишет.
+        if fresh_item.get("entity") is not None:
+            merged["entity"] = fresh_item["entity"]
+
+        items[index] = merged
+        return items, False, changed
+
+    items.append(fresh_item)
+    return items, True, False
+
+
 async def restore_saved_selection(client, subscribed_by_id):
     restored = []
     failed = []
@@ -654,6 +682,7 @@ async def prompt_add_public_channels(client, items):
         return items
 
     added = 0
+    updated = 0
 
     for part in raw.split(","):
         part = part.strip()
@@ -663,27 +692,32 @@ async def prompt_add_public_channels(client, items):
         try:
             item = await resolve_public_channel(client, part)
 
-            if any(
-                int(x["id"]) == int(item["id"])
-                for x in items
-            ):
-                print(f"  Уже есть: {item['name']}")
-                continue
-
-            items.append(item)
-            added += 1
+            items, was_added, was_updated = merge_resolved_channel(
+                items,
+                item,
+            )
 
             uname = item.get("username") or "без username"
-            print(f"  Добавлен: {item['name']} (@{uname})")
+            if was_added:
+                added += 1
+                print(f"  Добавлен: {item['name']} (@{uname})")
+            elif was_updated:
+                updated += 1
+                print(f"  Обновлён: {item['name']} (@{uname})")
+            else:
+                print(f"  Уже есть: {item['name']}")
 
         except Exception as e:
             print(f"  Не добавлен {part}: {e}")
 
     items = dedupe_channel_items(items)
 
-    if added:
+    if added or updated:
         save_selection(items)
+    if added:
         print(f"Добавлено новых каналов: {added}")
+    if updated:
+        print(f"Обновлено сохранённых каналов: {updated}")
 
     return items
 
@@ -908,18 +942,21 @@ async def select_from_subscriptions(client, subscribed):
                     print(f"  Не добавлен {raw_value}: {e}")
                     continue
 
-                if any(
-                    int(existing["id"]) == int(item["id"])
-                    for existing in items
-                ):
-                    print(f"  Уже есть: {item['name']}")
-                    continue
-
-                items.append(item)
-                uname = item.get("username") or "без username"
-                print(
-                    f"  Добавлен: {item['name']} (@{uname})"
+                items, was_added, was_updated = merge_resolved_channel(
+                    items,
+                    item,
                 )
+                uname = item.get("username") or "без username"
+                if was_added:
+                    print(
+                        f"  Добавлен: {item['name']} (@{uname})"
+                    )
+                elif was_updated:
+                    print(
+                        f"  Обновлён: {item['name']} (@{uname})"
+                    )
+                else:
+                    print(f"  Уже есть: {item['name']}")
 
         items = dedupe_channel_items(items)
         if not items:

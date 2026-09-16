@@ -4,7 +4,7 @@
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Release](https://img.shields.io/badge/release-5.4.9%20Stable-blue)
+![Release](https://img.shields.io/badge/release-5.4.10%20Stable-blue)
 
 **TelegramNewsAI — локальная Windows-программа для тех, кто не хочет вручную перечитывать десятки Telegram-каналов после перерыва.** Она собирает публикации выбранных каналов, сохраняет историю в SQLite, догружает пропущенное, ищет по архиву и готовит набор структурированных JSON-выгрузок для анализа в ИИ-ассистентах.
 

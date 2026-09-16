@@ -268,6 +268,63 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("номера из списка подписок", printed)
         self.assertIn("уже добавлены", printed)
 
+    def test_readding_public_channel_repairs_stale_saved_username(self):
+        existing = [
+            {"id": 99, "name": "Pavel Durov", "username": None}
+        ]
+        fresh = {
+            "id": 99,
+            "name": "Pavel Durov",
+            "username": "durov",
+            "entity": SimpleNamespace(id=99, username="durov"),
+        }
+
+        with patch("builtins.input", return_value="https://t.me/durov"):
+            with patch.object(
+                collector,
+                "resolve_public_channel",
+                AsyncMock(return_value=fresh),
+            ):
+                with patch.object(collector, "save_selection") as mocked_save:
+                    with patch("builtins.print") as mocked_print:
+                        result = asyncio.run(
+                            collector.prompt_add_public_channels(
+                                object(),
+                                list(existing),
+                            )
+                        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 99)
+        self.assertEqual(result[0]["username"], "durov")
+        mocked_save.assert_called_once()
+        saved = mocked_save.call_args.args[0]
+        self.assertEqual(saved[0]["username"], "durov")
+        printed = " ".join(
+            str(argument)
+            for call in mocked_print.call_args_list
+            for argument in call.args
+        )
+        self.assertIn("Обновлён: Pavel Durov (@durov)", printed)
+        self.assertIn("Обновлено сохранённых каналов: 1", printed)
+
+    def test_merge_resolved_channel_keeps_single_item_and_refreshes_name(self):
+        existing = [{"id": 7, "name": "Old", "username": "channel"}]
+        fresh = {
+            "id": 7,
+            "name": "New name",
+            "username": "channel",
+            "entity": object(),
+        }
+        result, added, updated = collector.merge_resolved_channel(
+            list(existing),
+            fresh,
+        )
+        self.assertFalse(added)
+        self.assertTrue(updated)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "New name")
+
     def test_channel_add_does_not_fetch_all_subscriptions(self):
         existing = [{"id": 10, "name": "Saved", "username": "saved_channel"}]
         client = SimpleNamespace(get_dialogs=AsyncMock())
