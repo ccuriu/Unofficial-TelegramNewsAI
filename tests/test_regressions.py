@@ -99,6 +99,158 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertFalse(collector.is_valid_api_hash("\x16"))
         self.assertFalse(collector.is_valid_api_hash("g" * 32))
 
+    def test_api_safety_defaults_are_conservative(self):
+        self.assertGreaterEqual(
+            collector.history_request_wait_seconds(self.settings),
+            0.5,
+        )
+        self.assertEqual(
+            collector.inter_channel_delay_seconds(self.settings, 50),
+            0.75,
+        )
+        self.assertEqual(
+            collector.inter_channel_delay_seconds(self.settings, 51),
+            1.5,
+        )
+        self.assertGreaterEqual(
+            collector.flood_wait_safety_seconds(self.settings),
+            1,
+        )
+
+    def test_history_wait_time_cannot_be_disabled_accidentally(self):
+        settings = dict(self.settings)
+        settings["history_request_wait_seconds"] = 0
+        self.assertEqual(
+            collector.history_request_wait_seconds(settings),
+            0.5,
+        )
+
+    def test_sync_channel_passes_explicit_wait_time_to_history_requests(self):
+        class EmptyAsyncIterator:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def iter_messages(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return EmptyAsyncIterator()
+
+        client = FakeClient()
+        result = asyncio.run(
+            collector.sync_channel_once(
+                client,
+                self.connection,
+                self.channel,
+                24,
+                self.settings,
+            )
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertGreaterEqual(len(client.calls), 2)
+        expected = collector.history_request_wait_seconds(
+            self.settings
+        )
+        for _, kwargs in client.calls:
+            self.assertEqual(kwargs.get("wait_time"), expected)
+
+    def test_sync_all_channels_stops_after_unhandled_flood_wait(self):
+        channels = [
+            dict(self.channel),
+            {
+                "id": 2,
+                "name": "Second",
+                "username": "second",
+                "entity": 2,
+            },
+        ]
+        failed = {
+            "channel": "Test",
+            "username": "test",
+            "first_sync": False,
+            "new": 0,
+            "content_changed": 0,
+            "metrics_changed": 0,
+            "migrated": 0,
+            "same": 0,
+            "scanned": 0,
+            "status": "error",
+            "error": "FloodWait 120 сек.",
+            "halt_sync": True,
+        }
+
+        with patch.object(
+            collector,
+            "sync_channel_with_retries",
+            AsyncMock(return_value=failed),
+        ) as mocked_sync:
+            with patch.object(
+                collector.asyncio,
+                "sleep",
+                AsyncMock(),
+            ) as mocked_sleep:
+                result = asyncio.run(
+                    collector.sync_all_channels(
+                        object(),
+                        self.connection,
+                        channels,
+                        24,
+                        self.settings,
+                    )
+                )
+
+        self.assertEqual(mocked_sync.await_count, 1)
+        mocked_sleep.assert_not_awaited()
+        self.assertTrue(
+            result["api_safety"]["halted_by_flood_wait"]
+        )
+
+    def test_history_backfill_is_skipped_after_sync_flood_stop(self):
+        halted_sync = {
+            "successful_channels": 0,
+            "failed_channels": 1,
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "unchanged_messages_refreshed": 0,
+            "telegram_messages_scanned": 0,
+            "channel_results": [],
+            "api_safety": {
+                "halted_by_flood_wait": True,
+            },
+        }
+
+        with patch.object(
+            collector,
+            "sync_all_channels",
+            AsyncMock(return_value=halted_sync),
+        ):
+            with patch.object(
+                collector,
+                "backfill_channel_history_with_retries",
+                AsyncMock(),
+            ) as mocked_backfill:
+                status = asyncio.run(
+                    collector._v4_ensure_history_for_search(
+                        object(),
+                        self.connection,
+                        [self.channel],
+                        30,
+                        self.settings,
+                    )
+                )
+
+        mocked_backfill.assert_not_awaited()
+        self.assertFalse(status["complete"])
+        self.assertEqual(status["incomplete_channels"], 1)
+
     def test_api_hash_prompt_retries_after_bad_hidden_paste(self):
         with patch.object(
             collector,
