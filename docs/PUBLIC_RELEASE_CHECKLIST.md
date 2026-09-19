@@ -23,7 +23,7 @@
 
 - [x] Пользовательское название сборки: **Unofficial Telegram News Digest**.
 - [x] Release launcher собирается без Telegram-подобного пользовательского значка.
-- [x] Release ZIP называется `Unofficial-TelegramNewsAI-...`.
+- [x] Release ZIP называется `Unofficial-Telegram-News-Digest-...`.
 - [ ] Перед public при необходимости переименован slug репозитория; внутренние старые имена используются только для совместимости и истории.
 - [ ] Финально проверены README, скриншоты, Releases и описание репозитория на отсутствие впечатления официального продукта Telegram.
 
