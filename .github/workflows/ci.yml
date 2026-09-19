@@ -68,10 +68,16 @@ jobs:
           $process = Start-Process .\Telegram_Digest.exe -ArgumentList '--self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Launcher self-test failed: $($process.ExitCode)" }
 
-      - name: Compile launcher source
+      - name: Compile and self-test launcher source
         shell: powershell
         run: |
-          .\launcher\build_launcher.ps1 -OutputPath "$env:RUNNER_TEMP\Telegram_Digest.exe"
+          $launcherDir = Join-Path $env:RUNNER_TEMP 'launcher-self-test'
+          New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
+          Copy-Item .\start_free.bat (Join-Path $launcherDir 'start_free.bat') -Force
+          $compiled = Join-Path $launcherDir 'Telegram_Digest.exe'
+          .\launcher\build_launcher.ps1 -OutputPath $compiled
+          $process = Start-Process $compiled -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Compiled launcher self-test failed: $($process.ExitCode)" }
 
       - name: Build clean release candidate
         shell: powershell
@@ -114,7 +120,7 @@ jobs:
       - name: Upload verified release files
         uses: actions/upload-artifact@v7
         with:
-          name: TelegramNewsAI-Windows-Build
+          name: Unofficial-TelegramNewsAI-Windows-Build
           path: |
             ${{ runner.temp }}/release/*.zip
             ${{ runner.temp }}/release/*.sha256.txt

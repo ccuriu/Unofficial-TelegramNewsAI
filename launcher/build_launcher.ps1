@@ -4,10 +4,9 @@
 
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'Telegram_Digest.cs'
-$icon = Join-Path $PSScriptRoot 'TelegramNewsAI.ico'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
-foreach ($required in @($source, $icon, $compiler)) {
+foreach ($required in @($source, $compiler)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required launcher build file not found: $required"
     }
@@ -21,7 +20,7 @@ if (-not (Test-Path -LiteralPath $outputDirectory)) {
 
 & $compiler /nologo /target:winexe /optimize+ /platform:anycpu `
     /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
-    "/win32icon:$icon" "/out:$resolvedOutput" $source
+    "/out:$resolvedOutput" $source
 if ($LASTEXITCODE -ne 0) {
     throw "Launcher compilation failed with exit code $LASTEXITCODE."
 }

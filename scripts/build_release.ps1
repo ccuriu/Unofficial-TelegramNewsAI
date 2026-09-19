@@ -10,7 +10,7 @@ if (-not $versionMatch) { throw 'Could not determine APP_VERSION.' }
 $versionRaw = $versionMatch.Matches[0].Groups[1].Value
 $channel = if ($versionRaw -match '\s+Testing$') { 'Testing' } else { 'Stable' }
 $version = $versionRaw -replace '\s+(Stable|Testing)$', '' -replace '[^0-9A-Za-z._-]', '_'
-$packageName = "TelegramNewsAI-$version-$channel-Windows"
+$packageName = "Unofficial-TelegramNewsAI-$version-$channel-Windows"
 $package = [IO.Path]::GetFullPath((Join-Path $output $packageName))
 $zip = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.zip')))
 $zipChecksum = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.sha256.txt')))
@@ -22,27 +22,36 @@ foreach ($target in @($package, $zip, $zipChecksum)) {
     }
 }
 
-$expectedExeHash = ((Get-Content -LiteralPath (Join-Path $root 'Telegram_Digest.exe.sha256') -Raw).Trim() -split '\s+')[0]
-$actualExeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'Telegram_Digest.exe')).Hash
-if ($actualExeHash -ne $expectedExeHash) { throw 'Telegram_Digest.exe checksum mismatch.' }
-
 if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Recurse -Force }
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 if (Test-Path -LiteralPath $zipChecksum) { Remove-Item -LiteralPath $zipChecksum -Force }
 New-Item -ItemType Directory -Path $package -Force | Out-Null
 
-$allowed = @(
+$copied = @(
     'INSTALL.bat', 'install.ps1', 'README.md', 'LICENSE', 'SECURITY.md',
     'requirements.txt', 'run_python.bat', 'start_free.bat',
-    'telegram_collector_free.py', 'Telegram_Digest.exe',
-    'Telegram_Digest.exe.sha256'
+    'telegram_collector_free.py'
 )
-foreach ($name in $allowed) {
+foreach ($name in $copied) {
     $source = Join-Path $root $name
     if (-not (Test-Path -LiteralPath $source)) { throw "Required release file not found: $name" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $package $name) -Force
 }
 
+# Launcher в release всегда собирается из актуального исходника.
+# Так пакет не зависит от старого prebuilt EXE в корне репозитория.
+$launcher = Join-Path $package 'Telegram_Digest.exe'
+& (Join-Path $root 'launcher\build_launcher.ps1') -OutputPath $launcher
+if (-not (Test-Path -LiteralPath $launcher)) {
+    throw 'Launcher was not built.'
+}
+$launcherHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $launcher).Hash
+$checksumText = $launcherHash + '  Telegram_Digest.exe' + [Environment]::NewLine
+[IO.File]::WriteAllText(
+    (Join-Path $package 'Telegram_Digest.exe.sha256'),
+    $checksumText,
+    [Text.UTF8Encoding]::new($false)
+)
 $forbiddenPattern = '(^|[\\/])(credentials(?:\.unreadable-[^\\/]*)?\.bin|[^\\/]*\.session(?:-journal)?|news\.db(?:-[^\\/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|[\\/])(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)([\\/]|$)'
 $forbidden = @(Get-ChildItem -LiteralPath $package -Recurse -Force | Where-Object {
     $_.FullName.Substring($package.Length).TrimStart('\') -match $forbiddenPattern
