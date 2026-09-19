@@ -32,14 +32,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 try:
     from telethon import TelegramClient
     from telethon.errors import ApiIdInvalidError, FloodWaitError
-    from telethon.tl.types import Channel
+    from telethon.tl.types import Channel, PeerChannel
 except ImportError:
     print("Telethon не установлен.")
     print("Выполните: python -m pip install --upgrade telethon")
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.11 Testing"
+APP_VERSION = "5.4.12 Testing"
+APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -144,10 +145,11 @@ DEFAULT_SETTINGS = {
 
     "channel_retry_attempts": 3,
     "retry_delay_seconds": 3,
-    "max_flood_wait_seconds": 60,
-    # Фиксируем поведение Telethon явно: ожидания до этого порога
-    # библиотека пережидает сама, более длинные попадают в наш retry-код.
-    "telethon_flood_sleep_threshold_seconds": 60,
+    # В Testing-ветке любой FloodWait должен быть виден приложению:
+    # Telethon ничего не пережидает и не повторяет скрыто от нашего кода.
+    "max_flood_wait_seconds": 0,
+    "telethon_flood_sleep_threshold_seconds": 0,
+    "stop_on_any_flood_wait": True,
 
     # Консервативный профиль Telegram API на период тестирования.
     # wait_time задаёт паузу между последовательными GetHistoryRequest
@@ -229,25 +231,12 @@ def load_settings():
         "open_html_preview": False,
         "refresh_recent_messages": max(0, min(100, int(result.get("refresh_recent_messages", 50)))),
         "refresh_recent_hours": max(0, float(result.get("refresh_recent_hours", 2))),
-        "max_flood_wait_seconds": max(
-            0,
-            min(
-                60,
-                int(result.get("max_flood_wait_seconds", 60)),
-            ),
-        ),
-        "telethon_flood_sleep_threshold_seconds": max(
-            0,
-            min(
-                60,
-                int(
-                    result.get(
-                        "telethon_flood_sleep_threshold_seconds",
-                        60,
-                    )
-                ),
-            ),
-        ),
+        # На период закрытого тестирования не позволяем настройками
+        # скрыть FloodWait внутри Telethon или автоматически продолжить
+        # сетевую нагрузку после первого серверного ограничения.
+        "max_flood_wait_seconds": 0,
+        "telethon_flood_sleep_threshold_seconds": 0,
+        "stop_on_any_flood_wait": True,
         "history_request_wait_seconds": max(
             0.5,
             min(
@@ -403,6 +392,39 @@ def flood_wait_safety_seconds(settings):
     except (TypeError, ValueError):
         value = 5
     return max(1, min(60, value))
+
+
+SECURITY_RPC_MARKERS = (
+    "PEER_FLOOD",
+    "AUTH_KEY",
+    "AUTHKEY",
+    "SESSION_REVOKED",
+    "SESSIONREVOKED",
+    "SESSION_EXPIRED",
+    "SESSIONEXPIRED",
+    "USER_DEACTIVATED",
+    "USERDEACTIVATED",
+    "PHONE_NUMBER_BANNED",
+    "PHONENUMBERBANNED",
+    "USER_RESTRICTED",
+    "USERRESTRICTED",
+    "UNAUTHORIZED",
+)
+
+
+def telegram_error_requires_safety_stop(error):
+    """True для ограничений/авторизации, которые нельзя слепо ретраить."""
+    combined = (
+        f"{type(error).__name__} {error}"
+    ).upper()
+
+    if "FLOOD" in combined:
+        return True
+
+    return any(
+        marker in combined
+        for marker in SECURITY_RPC_MARKERS
+    )
 
 
 # ============================================================
@@ -756,6 +778,46 @@ def merge_resolved_channel(items, fresh_item):
 
     items.append(fresh_item)
     return items, True, False
+
+
+async def restore_saved_selection_from_session(client, items=None):
+    """
+    Восстанавливает сохранённые каналы из entity-cache Telethon.
+
+    get_input_entity обычно работает только с локальным *.session и не
+    делает API-вызов. Полный список диалогов читается только как редкий
+    fallback, если локального access_hash для одного из каналов не хватает.
+    """
+    saved_items = dedupe_channel_items(
+        list(items) if items is not None else load_selection()
+    )
+    restored = []
+    failed = []
+
+    for saved in saved_items:
+        sid = int(saved.get("id", 0))
+        if sid <= 0:
+            failed.append(saved)
+            continue
+
+        try:
+            input_entity = await client.get_input_entity(
+                PeerChannel(sid)
+            )
+            restored.append({
+                "id": sid,
+                "name": (
+                    saved.get("name")
+                    or saved.get("username")
+                    or str(sid)
+                ),
+                "username": saved.get("username"),
+                "entity": input_entity,
+            })
+        except Exception:
+            failed.append(saved)
+
+    return dedupe_channel_items(restored), failed
 
 
 async def restore_saved_selection(client, subscribed_by_id):
@@ -1205,6 +1267,27 @@ async def resolve_channels(
 
         save_selection(restored)
         return restored
+
+    # Обычный дайджест/backfill сначала использует entity-cache уже
+    # существующей Telegram-сессии. Это убирает get_dialogs(limit=None)
+    # из штатного ежедневного пути и не меняет набор выбранных каналов.
+    if skip_menu and not initial_action:
+        saved = dedupe_channel_items(load_selection())
+        if saved:
+            restored, cache_failed = (
+                await restore_saved_selection_from_session(
+                    client,
+                    saved,
+                )
+            )
+            if not cache_failed:
+                return restored
+
+            print(
+                "\nЛокального кэша Telegram недостаточно для "
+                f"{len(cache_failed)} канал(ов); выполняю разовое "
+                "восстановление списка подписок."
+            )
 
     print("\nПолучаю список ваших подписок...")
     dialogs = await client.get_dialogs(limit=None)
@@ -3330,18 +3413,9 @@ async def sync_channel_with_retries(
         ),
     )
 
-    max_flood_wait = max(
-        0,
-        int(
-            settings.get(
-                "max_flood_wait_seconds",
-                90,
-            )
-        ),
-    )
-
     last_error = None
     halt_sync = False
+    halt_reason = None
 
     for attempt in range(
         1,
@@ -3364,29 +3438,17 @@ async def sync_channel_with_retries(
             last_error = (
                 f"FloodWait {e.seconds} сек."
             )
-
-            if (
-                e.seconds <= max_flood_wait
-                and attempt < attempts
-            ):
-                print(
-                    f"    Telegram просит подождать "
-                    f"{e.seconds} сек.; повторю..."
-                )
-                log_info(
-                    f"{channel['name']}: "
-                    f"{last_error}"
-                )
-                await asyncio.sleep(
-                    e.seconds
-                    + flood_wait_safety_seconds(settings)
-                )
-                continue
-
             halt_sync = True
+            halt_reason = "flood_wait"
+
             log_error(
                 f"{channel['name']}: {last_error}; "
-                "синхронизация остановлена для защиты аккаунта."
+                "сетевой этап остановлен без автоматического повтора."
+            )
+            print(
+                f"    Telegram вернул FloodWait {e.seconds} сек. "
+                "Автоповтор отключён; текущая синхронизация "
+                "останавливается."
             )
             break
 
@@ -3394,6 +3456,20 @@ async def sync_channel_with_retries(
             last_error = (
                 f"{type(e).__name__}: {e}"
             )
+
+            if telegram_error_requires_safety_stop(e):
+                halt_sync = True
+                halt_reason = "account_or_api_restriction"
+                log_error(
+                    f"{channel['name']} | SAFETY STOP | "
+                    f"{last_error}"
+                )
+                print(
+                    "    Telegram вернул ошибку авторизации/ограничения. "
+                    "Автоповтор отключён; текущая синхронизация "
+                    "останавливается."
+                )
+                break
 
             log_error(
                 f"{channel['name']} | "
@@ -3432,6 +3508,7 @@ async def sync_channel_with_retries(
         "status": "error",
         "error": last_error,
         "halt_sync": halt_sync,
+        "halt_reason": halt_reason,
     }
 
 
@@ -3455,6 +3532,8 @@ async def sync_all_channels(
         "history_request_wait_seconds": history_wait,
         "inter_channel_delay_seconds": channel_delay,
         "halted_by_flood_wait": False,
+        "halted_by_api_safety": False,
+        "halt_reason": None,
     }
 
     log_info(
@@ -3554,13 +3633,19 @@ async def sync_all_channels(
             )
 
         if result.get("halt_sync"):
+            reason = result.get("halt_reason") or "api_safety"
             overall["api_safety"][
-                "halted_by_flood_wait"
+                "halted_by_api_safety"
             ] = True
+            overall["api_safety"]["halt_reason"] = reason
+            if reason == "flood_wait":
+                overall["api_safety"][
+                    "halted_by_flood_wait"
+                ] = True
             print(
-                "      ЗАЩИТНАЯ ОСТАНОВКА: Telegram запросил "
-                "слишком длинную паузу. Остальные каналы "
-                "в этом запуске не запрашиваются."
+                "      ЗАЩИТНАЯ ОСТАНОВКА: после сигнала Telegram "
+                "остальные каналы в этом запуске не запрашиваются. "
+                f"Причина: {reason}."
             )
             break
 
@@ -3577,7 +3662,8 @@ async def sync_all_channels(
         f"{total_channels} | "
         f"failed={overall['failed_channels']} | "
         f"scanned={overall['telegram_messages_scanned']} | "
-        f"halted={overall['api_safety']['halted_by_flood_wait']} | "
+        f"halted={overall['api_safety']['halted_by_api_safety']} | "
+        f"halt_reason={overall['api_safety']['halt_reason']} | "
         f"duration={overall['duration_seconds']:.3f}s"
     )
 
@@ -3827,18 +3913,9 @@ async def backfill_channel_history_with_retries(
         ),
     )
 
-    max_flood_wait = max(
-        0,
-        int(
-            settings.get(
-                "max_flood_wait_seconds",
-                90,
-            )
-        ),
-    )
-
     last_error = None
     halt_sync = False
+    halt_reason = None
 
     for attempt in range(
         1,
@@ -3855,25 +3932,16 @@ async def backfill_channel_history_with_retries(
 
         except FloodWaitError as e:
             last_error = f"FloodWait {e.seconds} сек."
-
-            if (
-                e.seconds <= max_flood_wait
-                and attempt < attempts
-            ):
-                print(
-                    f"      Telegram просит подождать "
-                    f"{e.seconds} сек.; повторю..."
-                )
-                await asyncio.sleep(
-                    e.seconds
-                    + flood_wait_safety_seconds(settings)
-                )
-                continue
-
             halt_sync = True
+            halt_reason = "flood_wait"
+
             log_error(
                 f"BACKFILL {channel['name']}: {last_error}; "
-                "догрузка истории остановлена для защиты аккаунта."
+                "догрузка остановлена без автоматического повтора."
+            )
+            print(
+                f"      Telegram вернул FloodWait {e.seconds} сек. "
+                "Догрузка истории остановлена."
             )
             break
 
@@ -3881,6 +3949,19 @@ async def backfill_channel_history_with_retries(
             last_error = (
                 f"{type(e).__name__}: {e}"
             )
+
+            if telegram_error_requires_safety_stop(e):
+                halt_sync = True
+                halt_reason = "account_or_api_restriction"
+                log_error(
+                    f"BACKFILL {channel['name']} | SAFETY STOP | "
+                    f"{last_error}"
+                )
+                print(
+                    "      Telegram вернул ошибку авторизации/ограничения. "
+                    "Догрузка истории остановлена."
+                )
+                break
 
             log_error(
                 f"BACKFILL {channel['name']} | "
@@ -3911,6 +3992,7 @@ async def backfill_channel_history_with_retries(
         "latest_utc": None,
         "error": last_error,
         "halt_sync": halt_sync,
+        "halt_reason": halt_reason,
     }
 
 
@@ -3963,13 +4045,15 @@ async def _v4_ensure_history_for_search(
         settings,
     )
 
-    if sync_stats.get("api_safety", {}).get(
-        "halted_by_flood_wait",
-        False,
-    ):
+    api_safety = sync_stats.get("api_safety", {})
+    safety_halted = api_safety.get(
+        "halted_by_api_safety",
+        api_safety.get("halted_by_flood_wait", False),
+    )
+    if safety_halted:
         print(
             "\nДогрузка старой истории пропущена: "
-            "предыдущий этап остановлен из-за FloodWait."
+            "предыдущий сетевой этап остановлен защитой API."
         )
         return {
             "requested_days": int(days),
@@ -3999,7 +4083,8 @@ async def _v4_ensure_history_for_search(
                     "channel": None,
                     "error": (
                         "Догрузка истории отменена после "
-                        "защитной остановки FloodWait."
+                        "защитной остановки Telegram API: "
+                        f"{api_safety.get('halt_reason') or 'ограничение'}."
                     ),
                     "coverage_utc": None,
                 }
@@ -5917,6 +6002,11 @@ async def ensure_telegram_client(client, creds, settings=None):
     """
     Подключается к Telegram только когда это действительно нужно.
     Поиск по локальной news.db может работать вообще без Telegram.
+
+    Если credentials.bin уже существует, но сохранённая сессия исчезла
+    или перестала быть авторизованной, новый вход автоматически не
+    запускается: это отдельное событие безопасности, которое пользователь
+    должен сначала проверить.
     """
     if client is not None:
         try:
@@ -5925,18 +6015,22 @@ async def ensure_telegram_client(client, creds, settings=None):
         except Exception:
             pass
 
-    flood_sleep_threshold = max(
-        0,
-        min(
-            86400,
-            int(
-                (settings or DEFAULT_SETTINGS).get(
-                    "telethon_flood_sleep_threshold_seconds",
-                    60,
-                )
-            ),
-        ),
-    )
+    stored_credentials_at_start = CRED_FILE.exists()
+    session_path = Path(SESSION_FILE + ".session")
+
+    if (
+        stored_credentials_at_start
+        and not session_path.exists()
+    ):
+        raise RuntimeError(
+            "Найдены сохранённые Telegram credentials, но файл "
+            "telegram_session.session отсутствует. Автоматическая "
+            "повторная авторизация отключена. Восстановите сессию из "
+            "резервной копии или отдельно подтвердите создание новой."
+        )
+
+    # В Testing-ветке любой FloodWait должен дойти до нашего обработчика.
+    flood_sleep_threshold = 0
 
     while True:
         if creds is None:
@@ -5952,11 +6046,30 @@ async def ensure_telegram_client(client, creds, settings=None):
         print("\nПодключение к Telegram...")
 
         try:
-            await candidate.start(
-                phone=creds["phone"],
-                code_callback=prompt_telegram_code,
-                password=prompt_telegram_password,
-            )
+            await candidate.connect()
+            authorized = await candidate.is_user_authorized()
+
+            if (
+                stored_credentials_at_start
+                and not authorized
+            ):
+                try:
+                    await candidate.disconnect()
+                finally:
+                    raise RuntimeError(
+                        "Сохранённая Telegram-сессия больше не "
+                        "авторизована. Автоматический повторный вход "
+                        "отключён, чтобы не создавать лишние попытки "
+                        "авторизации. Закройте программу и сначала "
+                        "проверьте состояние аккаунта/сессии."
+                    )
+
+            if not authorized:
+                await candidate.start(
+                    phone=creds["phone"],
+                    code_callback=prompt_telegram_code,
+                    password=prompt_telegram_password,
+                )
 
         except ApiIdInvalidError:
             try:
@@ -5964,10 +6077,12 @@ async def ensure_telegram_client(client, creds, settings=None):
             except Exception:
                 pass
 
-            try:
-                CRED_FILE.unlink(missing_ok=True)
-            except Exception:
-                pass
+            if stored_credentials_at_start:
+                raise RuntimeError(
+                    "Telegram отклонил ранее сохранённые API ID / API Hash. "
+                    "Автоматическая замена credentials и повторная "
+                    "авторизация отключены."
+                )
 
             print(
                 "\nTelegram отклонил API ID / API Hash. "
@@ -5975,7 +6090,6 @@ async def ensure_telegram_client(client, creds, settings=None):
                 "https://my.telegram.org → API development tools."
             )
             print(
-                "Неверные данные не сохранены. "
                 "Введите API ID и API Hash заново."
             )
 
@@ -7460,7 +7574,7 @@ def setup_semantic_search():
 async def main():
     with InstanceLock():
         setup_logging()
-        print('\nTelegramNewsAI '+APP_VERSION)
+        print('\n'+APP_DISPLAY_NAME+' '+APP_VERSION)
         if '--setup-semantic' in sys.argv:
             setup_semantic_search()
             return
