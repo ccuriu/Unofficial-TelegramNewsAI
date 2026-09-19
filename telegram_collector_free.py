@@ -576,34 +576,30 @@ def load_or_create_credentials():
         try:
             raw = dpapi_decrypt(CRED_FILE.read_bytes())
             data = json.loads(raw.decode("utf-8"))
-            if (
-                isinstance(data, dict)
-                and isinstance(data.get("api_id"), int)
-                and data.get("api_id", 0) > 0
-                and is_valid_api_hash(data.get("api_hash"))
-                and str(data.get("phone") or "").strip()
-            ):
-                return data
-
-            print(
-                "Сохранённые данные Telegram API имеют неверный формат. "
-                "Нужно ввести их заново."
-            )
-            CRED_FILE.unlink(missing_ok=True)
         except Exception as e:
-            print(f"Не удалось прочитать credentials.bin: {e}")
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup_file = CRED_FILE.with_name(
-                f"credentials.unreadable-{timestamp}.bin"
-            )
-            CRED_FILE.replace(backup_file)
-            print(
-                "Старые данные авторизации не удалены и сохранены в "
-                f"{backup_file.name}."
-            )
-            print(
-                "Сейчас нужно один раз заново ввести данные Telegram API."
-            )
+            raise RuntimeError(
+                "Не удалось прочитать существующий credentials.bin. "
+                "Автоматическая замена сохранённых Telegram API-данных "
+                "отключена. Не удаляйте файл наугад: сначала проверьте "
+                "резервную копию и текущую Telegram-сессию. "
+                f"Техническая причина: {type(e).__name__}: {e}"
+            ) from e
+
+        if (
+            isinstance(data, dict)
+            and isinstance(data.get("api_id"), int)
+            and data.get("api_id", 0) > 0
+            and is_valid_api_hash(data.get("api_hash"))
+            and str(data.get("phone") or "").strip()
+        ):
+            return data
+
+        raise RuntimeError(
+            "Существующий credentials.bin имеет неверный формат. "
+            "Автоматическое удаление и повторный ввод отключены, чтобы "
+            "не создавать случайную новую авторизацию. Сначала проверьте "
+            "резервную копию и состояние Telegram-сессии."
+        )
 
     print("\n=== Первичная настройка Telegram ===")
     print("\nВАЖНО: Telegram предупреждает, что аккаунты,")
