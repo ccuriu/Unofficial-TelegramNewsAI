@@ -134,15 +134,15 @@ if ($venvBackup -and (Test-Path -LiteralPath $venvBackup)) {
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 if ($desktop -and -not $NoShortcut) {
-    $shortcutPath = Join-Path $desktop 'Unofficial TelegramNewsAI.lnk'
+    $shortcutPath = Join-Path $desktop 'Unofficial Telegram News Digest.lnk'
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = Join-Path $appDir 'Telegram_Digest.exe'
     $shortcut.WorkingDirectory = $appDir
     $shortcut.IconLocation = (Join-Path $appDir 'Telegram_Digest.exe') + ',0'
-    $shortcut.Description = 'Unofficial TelegramNewsAI'
+    $shortcut.Description = 'Unofficial Telegram News Digest'
     $shortcut.Save()
-    Write-Host 'Ярлык Unofficial TelegramNewsAI создан на рабочем столе.'
+    Write-Host 'Ярлык Unofficial Telegram News Digest создан на рабочем столе.'
 }
 
 Write-Host ''
