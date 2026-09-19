@@ -44,8 +44,8 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
-EXPORT_SCHEMA_VERSION = 6
-DIGEST_PROFILE_VERSION = "6.0"
+EXPORT_SCHEMA_VERSION = 7
+DIGEST_PROFILE_VERSION = "7.0"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -189,14 +189,9 @@ DEFAULT_SETTINGS = {
     "search_partial_coverage": 0.67,
     "search_partial_candidate_limit": 10000,
 
-    # Смысловой поиск опционален. После --setup-semantic он используется
-    # только как резерв, если лексический поиск дал мало результатов.
-    "semantic_enabled": False,
-    "semantic_model": "intfloat/multilingual-e5-small",
-    "semantic_max_messages": 20000,
-    "semantic_max_results": 60,
-    "semantic_min_score": 0.78,
-    "semantic_trigger_below": 8
+    # ML/embedding-поиск по Telegram-контенту отключён.
+    # Локальный поиск остаётся на SQLite FTS5/LIKE без внешних моделей.
+    "semantic_enabled": False
 }
 
 
@@ -273,6 +268,17 @@ def load_settings():
             ),
         ),
     })
+
+    # Не позволяем старому settings_free.json снова включить ML-поиск.
+    result["semantic_enabled"] = False
+    for obsolete_semantic_key in (
+        "semantic_model",
+        "semantic_max_messages",
+        "semantic_max_results",
+        "semantic_min_score",
+        "semantic_trigger_below",
+    ):
+        result.pop(obsolete_semantic_key, None)
 
     # Записываем новые параметры в существующий settings_free.json,
     # не требуя от пользователя заменять этот файл вручную.
@@ -4821,8 +4827,14 @@ def _v4_save_output(
             ),
 
             "digest_profile_version": DIGEST_PROFILE_VERSION,
-            "recommended_ai_request": (
+            "recommended_digest_request": (
                 DIGEST_REQUEST
+            ),
+            "content_use_notice": (
+                "Файл создан локально. Программа сама не передаёт Telegram-"
+                "контент внешним AI/ML-сервисам. Дальнейшее использование "
+                "должно соответствовать правилам Telegram, правам авторов "
+                "и применимому законодательству."
             ),
         },
 
@@ -5607,7 +5619,7 @@ def safe_filename_fragment(value, max_len=48):
     return value[:max_len].rstrip("._ ")
 
 
-def build_search_ai_instruction(question, effective_days, search_result):
+def build_search_digest_instruction(question, effective_days, search_result):
     return (
         "Подготовь профессиональный тематический обзор по вопросу: "
         f"«{question}». Период: последние {effective_days} дней. Если пользователь после загрузки пишет только «дайджест», "
@@ -5703,13 +5715,18 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
                 "quick_check_result": db_maintenance.get("quick_check_result"),
             },
             "usage_hint": (
-                "Передайте этот файл ИИ-ассистенту и попросите подготовить дайджест. "
+                "Локальный структурированный JSON-экспорт результатов поиска. "
                 "Вопрос, период и редакционная инструкция уже записаны внутри файла."
             ),
-            "recommended_ai_request": build_search_ai_instruction(
+            "recommended_digest_request": build_search_digest_instruction(
                 result["question"],
                 result["effective_days"],
                 result,
+            ),
+            "content_use_notice": (
+                "Программа сама не передаёт Telegram-контент внешним AI/ML-"
+                "сервисам. Дальнейшее использование файла должно соответствовать "
+                "правилам Telegram, правам авторов и применимому законодательству."
             ),
         },
         "search_overview": {
@@ -5944,14 +5961,14 @@ async def run_history_search_mode(
             "в файл попали наиболее релевантные результаты."
         )
 
-    print("\nФАЙЛ ДЛЯ ИИ-АССИСТЕНТА:")
+    print("\nСТРУКТУРИРОВАННЫЙ JSON-ЭКСПОРТ:")
     print(latest_path.name)
 
     print(
-        "\nПосле загрузки достаточно написать: Дайджест"
+        "\nВопрос, период и полнота истории уже записаны внутри JSON."
     )
     print(
-        "Вопрос, период и полнота истории уже записаны внутри JSON."
+        "Файл сохранён локально; программа сама не передаёт его внешним сервисам."
     )
 
     print("\nДатированная копия:")
@@ -6613,7 +6630,7 @@ async def _v4_main():
         )
 
         print(
-            "\nФАЙЛ ДЛЯ ИИ-АССИСТЕНТА:"
+            "\nСТРУКТУРИРОВАННЫЙ JSON-ЭКСПОРТ:"
         )
         print(
             latest_path.name
@@ -6652,8 +6669,8 @@ async def _v4_main():
             )
 
         print(
-            "\nПосле передачи файла ИИ-ассистенту "
-            "попросите подготовить дайджест."
+            "\nФайл сохранён локально. Программа сама не передаёт "
+            "Telegram-контент внешним сервисам."
         )
 
         if settings.get(
@@ -7238,51 +7255,17 @@ _SEMANTIC_MODELS={}
 
 
 def semantic_candidates(conn, rows, question, settings):
-    if not settings.get('semantic_enabled',False):
-        return [],{'enabled':False,'hint':'Для поиска по смыслу запустите enable_semantic.bat один раз.'}
-    try:
-        from sentence_transformers import SentenceTransformer
-        import numpy as np
-        name=settings.get('semantic_model','intfloat/multilingual-e5-small')
-        if name not in _SEMANTIC_MODELS:
-            # Downloads happen only via the explicit setup command.
-            _SEMANTIC_MODELS[name]=SentenceTransformer(name,cache_folder=str(APP_DIR/'models'),local_files_only=True)
-        model=_SEMANTIC_MODELS[name]
-        maximum=max(1,int(settings.get('semantic_max_messages',20000)))
-        chosen=rows[:maximum]
-        vectors=[]
-        print(f'Поиск по смыслу: проверка {len(chosen)} сообщений…')
-        for start in range(0,len(chosen),32):
-            batch=chosen[start:start+32]; batch_vectors={}; pending=[]
-            for index,row in enumerate(batch):
-                digest=hashlib.sha256((row['text'] or '').encode()).hexdigest()
-                cached=conn.execute('SELECT vector FROM semantic_vectors WHERE channel_id=? AND message_id=? AND model=? AND content_hash=?',
-                    (row['channel_id'],row['message_id'],name,digest)).fetchone()
-                if cached:
-                    batch_vectors[index]=np.frombuffer(cached[0],dtype=np.float32)
-                else:
-                    pending.append((index,row,digest))
-            if pending:
-                encoded=model.encode(['passage: '+(r['text'] or '') for _,r,_ in pending],normalize_embeddings=True,show_progress_bar=False)
-                for (index,row,digest),vec in zip(pending,encoded):
-                    vec=np.asarray(vec,dtype=np.float32); batch_vectors[index]=vec
-                    conn.execute('INSERT OR REPLACE INTO semantic_vectors VALUES(?,?,?,?,?)',
-                        (row['channel_id'],row['message_id'],name,digest,vec.tobytes()))
-                conn.commit()
-            vectors.extend(batch_vectors[i] for i in range(len(batch)))
-        if not chosen: return [],{'enabled':True,'indexed':0}
-        query=model.encode(['query: '+question],normalize_embeddings=True,show_progress_bar=False)[0]
-        scores=np.asarray(vectors) @ query
-        order=np.argsort(-scores)[:max(1,int(settings.get('semantic_max_results',60)))]
-        threshold=float(settings.get('semantic_min_score',0.78))
-        hits=[(chosen[int(i)],float(scores[int(i)])) for i in order if float(scores[int(i)])>=threshold]
-        return hits,{'enabled':True,'model':name,'indexed':len(chosen),'available':len(rows),
-                     'truncated':len(chosen)<len(rows),'threshold':threshold,
-                     'note':'Сходство по смыслу — подсказка для поиска, не подтверждение факта.'}
-    except Exception as e:
-        log_error('Semantic search: '+str(e))
-        print('Поиск по смыслу недоступен; продолжаю точный поиск. '+str(e))
-        return [],{'enabled':True,'available':False,'error':str(e)}
+    """
+    ML/embedding-поиск по Telegram-контенту намеренно отключён.
+
+    Базовый тематический поиск работает локально через SQLite FTS5/LIKE
+    и не требует модели машинного обучения.
+    """
+    return [], {
+        "enabled": False,
+        "used": False,
+        "reason": "disabled_for_telegram_content_compliance",
+    }
 
 
 def search_database(conn, question, days, settings, channel_ids=None, limit_override=None):
@@ -7558,17 +7541,13 @@ def print_database_status(conn, channels):
 
 
 def setup_semantic_search():
-    """Одноразово ставит модель и включает смысловой резерв в settings_free.json."""
-    print('\nНастройка смыслового поиска. Это опционально: обычный поиск работает и без модели.')
-    print('Устанавливаю sentence-transformers и загружаю multilingual-e5-small…')
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', 'sentence-transformers'])
-    from sentence_transformers import SentenceTransformer
-    settings = load_settings()
-    model_name = settings.get('semantic_model', 'intfloat/multilingual-e5-small')
-    SentenceTransformer(model_name, cache_folder=str(APP_DIR / 'models'))
-    settings['semantic_enabled'] = True
-    SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
-    print('Готово. Смысловой поиск включён как резерв для слабой лексической выдачи.')
+    """Старый CLI-флаг сохранён только ради понятного сообщения."""
+    print(
+        "\nСмысловой ML-поиск отключён в этой версии. "
+        "Поиск по Telegram-контенту работает локально через SQLite FTS5/LIKE."
+    )
+    return False
+
 
 
 async def main():
@@ -7616,7 +7595,7 @@ def save_search_output(conn, question, days, settings, db_maintenance, channels=
 PREVIEW_HTML=r'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
-<title>TelegramNewsAI · Просмотр</title><style>
+<title>Unofficial TelegramNewsAI · Просмотр</title><style>
 :root{color-scheme:light;--ink:#1c293d;--muted:#607086;--blue:#2463ac;--line:#dce5ef}
 *{box-sizing:border-box}body{margin:0;background:#f3f6fa;color:var(--ink);font:16px/1.6 'Segoe UI',Arial,sans-serif}
 header{background:#142a43;color:white;padding:30px max(24px,calc((100vw - 1100px)/2));border-bottom:5px solid #64b4d4}
@@ -7632,7 +7611,7 @@ a{color:var(--blue)}details{border-top:1px solid var(--line);margin-top:13px;pad
 button{border:1px solid #b9c9db;border-radius:8px;padding:10px 18px;background:white;color:var(--blue);cursor:pointer}footer{padding:28px 0;color:var(--muted);font-size:12px}
 @media(max-width:750px){.toolbar{grid-template-columns:1fr 1fr}header{padding:22px}h1{font-size:24px}main{padding:0 14px}article{padding:16px}}
 @media print{.toolbar,button{display:none}header{background:white;color:black}article{break-inside:avoid}}
-</style></head><body><header><div class="eyebrow" id="eyebrow">TELEGRAMNEWSAI</div><h1 id="title">Лента публикаций</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
+</style></head><body><header><div class="eyebrow" id="eyebrow">UNOFFICIAL TELEGRAMNEWSAI</div><h1 id="title">Лента публикаций</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
 <main><div id="quality" class="status"></div><details id="coverage"><summary>Полнота истории по каналам</summary><div id="coverageBody"></div></details>
 <div class="toolbar"><label>Найти в результатах<input id="query" placeholder="Слово, имя или фраза"></label><label>Канал<select id="channel"><option value="">Все каналы</option></select></label>
 <label>Состояние<select id="state"><option value="">Все сообщения</option><option value="new">Новые</option><option value="edited">Исправленные</option><option value="unavailable">Недоступные</option><option value="operational">Оперативные</option><option value="semantic">По смыслу</option></select></label>
@@ -7644,7 +7623,7 @@ button{border:1px solid #b9c9db;border-radius:8px;padding:10px 18px;background:w
 const payload=JSON.parse(document.getElementById('payload').textContent),meta=payload.meta||{};
 const $=id=>document.getElementById(id);
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
-$('eyebrow').textContent='TELEGRAMNEWSAI'+(meta.collector_version?' · '+meta.collector_version:'');
+$('eyebrow').textContent='UNOFFICIAL TELEGRAMNEWSAI'+(meta.collector_version?' · '+meta.collector_version:'');
 const messages=[...(payload.news_messages||[]),...(payload.operational_messages||[]).map(m=>({...m,operational:true})),...(payload.search_results||[]),...(payload.related_context||[])];
 const history=meta.history_completeness||{},quality=$('quality');
 quality.classList.toggle('warn',history.complete!==true);
