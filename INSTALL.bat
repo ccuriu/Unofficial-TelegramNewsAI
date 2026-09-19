@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Установка Unofficial TelegramNewsAI
+title Установка Unofficial Telegram News Digest
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
 if errorlevel 1 (
   echo.
