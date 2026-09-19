@@ -1,5 +1,13 @@
 # TelegramNewsAI
 
+> [!CAUTION]
+> **Публичное распространение временно приостановлено.**
+>
+> Проект переведён в дополнительное тестирование из-за непрозрачных антиспам-ограничений Telegram API для сторонних клиентов. До завершения тестирования автор не рекомендует устанавливать текущие публичные сборки или подключать к ним Telegram-аккаунты, потеря доступа к которым критична.
+>
+> Репозиторий планируется вернуть в публичный доступ после проверки поведения на разных объёмах каналов и периодах синхронизации.
+
+
 [![CI](https://github.com/ccuriu/TelegramNewsAI/actions/workflows/ci.yml/badge.svg)](https://github.com/ccuriu/TelegramNewsAI/actions/workflows/ci.yml)
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
