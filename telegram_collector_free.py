@@ -1078,6 +1078,8 @@ async def select_from_subscriptions(client, subscribed):
                     )
                 except Exception as e:
                     print(f"  Не добавлен {raw_value}: {e}")
+                    if public_index < len(public_values):
+                        await asyncio.sleep(0.5)
                     continue
 
                 items, was_added, was_updated = merge_resolved_channel(
@@ -3941,6 +3943,49 @@ async def _v4_ensure_history_for_search(
         effective_days * 24,
         settings,
     )
+
+    if sync_stats.get("api_safety", {}).get(
+        "halted_by_flood_wait",
+        False,
+    ):
+        print(
+            "\nДогрузка старой истории пропущена: "
+            "предыдущий этап остановлен из-за FloodWait."
+        )
+        return {
+            "requested_days": int(days),
+            "effective_days": effective_days,
+            "cutoff_utc": iso_utc(cutoff_dt),
+            "selected_channels": len(channels),
+            "complete_channels": 0,
+            "incomplete_channels": len(channels),
+            "complete": False,
+            "sync_quality": {
+                "successful_channels": sync_stats.get(
+                    "successful_channels",
+                    0,
+                ),
+                "failed_channels": sync_stats.get(
+                    "failed_channels",
+                    0,
+                ),
+                "new_messages_saved": sync_stats.get(
+                    "new_messages_saved",
+                    0,
+                ),
+            },
+            "channel_coverage": [],
+            "warnings": [
+                {
+                    "channel": None,
+                    "error": (
+                        "Догрузка истории отменена после "
+                        "защитной остановки FloodWait."
+                    ),
+                    "coverage_utc": None,
+                }
+            ],
+        }
 
     print(
         f"\nПроверяю полноту истории за "
