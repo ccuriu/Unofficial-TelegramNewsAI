@@ -784,11 +784,12 @@ def merge_resolved_channel(items, fresh_item):
 
 async def restore_saved_selection_from_session(client, items=None):
     """
-    Восстанавливает сохранённые каналы из entity-cache Telethon.
+    Восстанавливает сохранённые каналы строго из локального entity-cache.
 
-    get_input_entity обычно работает только с локальным *.session и не
-    делает API-вызов. Полный список диалогов читается только как редкий
-    fallback, если локального access_hash для одного из каналов не хватает.
+    Используем client.session.get_input_entity, а не клиентский
+    get_input_entity: последний при cache miss может сам обратиться к API.
+    Полный список диалогов читается только как явный fallback, если
+    локального access_hash для одного из сохранённых каналов не хватает.
     """
     saved_items = dedupe_channel_items(
         list(items) if items is not None else load_selection()
@@ -803,7 +804,7 @@ async def restore_saved_selection_from_session(client, items=None):
             continue
 
         try:
-            input_entity = await client.get_input_entity(
+            input_entity = client.session.get_input_entity(
                 PeerChannel(sid)
             )
             restored.append({
