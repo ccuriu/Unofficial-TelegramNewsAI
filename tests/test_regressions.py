@@ -112,9 +112,16 @@ class OfflineRegressionTests(unittest.TestCase):
             collector.inter_channel_delay_seconds(self.settings, 51),
             1.5,
         )
-        self.assertGreaterEqual(
-            collector.flood_wait_safety_seconds(self.settings),
-            1,
+        self.assertEqual(
+            collector.DEFAULT_SETTINGS["telethon_flood_sleep_threshold_seconds"],
+            0,
+        )
+        self.assertEqual(
+            collector.DEFAULT_SETTINGS["max_flood_wait_seconds"],
+            0,
+        )
+        self.assertTrue(
+            collector.DEFAULT_SETTINGS["stop_on_any_flood_wait"]
         )
 
     def test_history_wait_time_cannot_be_disabled_accidentally(self):
@@ -183,6 +190,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "status": "error",
             "error": "FloodWait 120 сек.",
             "halt_sync": True,
+            "halt_reason": "flood_wait",
         }
 
         with patch.object(
@@ -209,6 +217,13 @@ class OfflineRegressionTests(unittest.TestCase):
         mocked_sleep.assert_not_awaited()
         self.assertTrue(
             result["api_safety"]["halted_by_flood_wait"]
+        )
+        self.assertTrue(
+            result["api_safety"]["halted_by_api_safety"]
+        )
+        self.assertEqual(
+            result["api_safety"]["halt_reason"],
+            "flood_wait",
         )
 
     def test_history_backfill_is_skipped_after_sync_flood_stop(self):
@@ -499,6 +514,105 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(result, existing)
         client.get_dialogs.assert_not_awaited()
         mocked_save.assert_called_once_with(existing)
+
+    def test_normal_digest_restores_saved_channels_from_session_cache(self):
+        existing = [
+            {
+                "id": 10,
+                "name": "Saved",
+                "username": "saved_channel",
+            }
+        ]
+        input_entity = SimpleNamespace(channel_id=10)
+        client = SimpleNamespace(
+            get_input_entity=AsyncMock(return_value=input_entity),
+            get_dialogs=AsyncMock(),
+        )
+
+        with patch.object(
+            collector,
+            "load_selection",
+            return_value=list(existing),
+        ):
+            result = asyncio.run(
+                collector.resolve_channels(
+                    client,
+                    skip_menu=True,
+                )
+            )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 10)
+        self.assertIs(result[0]["entity"], input_entity)
+        client.get_input_entity.assert_awaited_once()
+        client.get_dialogs.assert_not_awaited()
+
+    def test_restriction_like_errors_require_safety_stop(self):
+        SessionRevokedError = type(
+            "SessionRevokedError",
+            (Exception,),
+            {},
+        )
+        self.assertTrue(
+            collector.telegram_error_requires_safety_stop(
+                SessionRevokedError("revoked")
+            )
+        )
+        self.assertTrue(
+            collector.telegram_error_requires_safety_stop(
+                RuntimeError("PEER_FLOOD")
+            )
+        )
+        self.assertFalse(
+            collector.telegram_error_requires_safety_stop(
+                OSError("temporary network failure")
+            )
+        )
+
+    def test_established_install_does_not_auto_reauthorize_missing_session(self):
+        original_cred = collector.CRED_FILE
+        original_session = collector.SESSION_FILE
+        try:
+            collector.CRED_FILE = self.directory / "credentials.bin"
+            collector.CRED_FILE.write_bytes(b"existing")
+            collector.SESSION_FILE = str(
+                self.directory / "telegram_session"
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "telegram_session.session отсутствует",
+            ):
+                asyncio.run(
+                    collector.ensure_telegram_client(
+                        None,
+                        {
+                            "api_id": 1,
+                            "api_hash": "a" * 32,
+                            "phone": "+10000000000",
+                        },
+                        self.settings,
+                    )
+                )
+        finally:
+            collector.CRED_FILE = original_cred
+            collector.SESSION_FILE = original_session
+
+    def test_ml_semantic_processing_is_disabled(self):
+        self.assertFalse(
+            collector.DEFAULT_SETTINGS["semantic_enabled"]
+        )
+        hits, meta = collector.semantic_candidates(
+            self.connection,
+            [],
+            "проверка",
+            self.settings,
+        )
+        self.assertEqual(hits, [])
+        self.assertEqual(
+            meta["reason"],
+            "disabled_for_telegram_content_compliance",
+        )
 
     @unittest.skipUnless(collector.os.name == "nt", "Windows named mutex")
     def test_default_instance_lock_blocks_second_copy_across_folders(self):
@@ -960,27 +1074,44 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(collector.DIGEST_REQUEST), 6000)
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
-        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 6)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "6.0")
+        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 7)
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "7.0")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
 
-    def test_export_contract_is_ai_vendor_neutral(self):
+    def test_export_contract_keeps_external_handoff_neutral(self):
         source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn('"recommended_ai_request"', source)
-        self.assertNotIn('"recommended_chatgpt_request"', source)
-        self.assertTrue(hasattr(collector, "build_search_ai_instruction"))
-        self.assertFalse(hasattr(collector, "build_search_chatgpt_instruction"))
-        self.assertNotIn("ЗАГРУЗИТЬ_В_CHATGPT_", source)
+        self.assertIn('"recommended_digest_request"', source)
+        self.assertNotIn('"recommended_ai_request"', source)
+        self.assertIn('"content_use_notice"', source)
+        self.assertTrue(
+            hasattr(collector, "build_search_digest_instruction")
+        )
+        self.assertFalse(
+            hasattr(collector, "build_search_digest_instruction")
+        )
+        self.assertNotIn("ФАЙЛ ДЛЯ ИИ-АССИСТЕНТА", source)
 
-    def test_readme_positions_json_as_portable_ai_input(self):
+    def test_readme_documents_local_only_export_and_policy_review(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("структурированных JSON-выгрузок для анализа в ИИ-ассистентах", readme)
-        self.assertIn("Формат выгрузки не привязан к конкретной модели", readme)
-        self.assertIn("основное тестирование TelegramNewsAI проводится в ChatGPT", readme)
-        self.assertIn("может различаться между платформами", readme)
-        self.assertNotIn("подготовки JSON для анализа в ChatGPT", readme)
+        self.assertIn(
+            "Программа сама не отправляет содержимое Telegram во внешние AI/ML-сервисы",
+            readme,
+        )
+        self.assertIn(
+            "Смысловой ML/embedding-поиск по Telegram-контенту",
+            readme,
+        )
+        self.assertIn(
+            "Sponsored Messages",
+            readme,
+        )
+        self.assertIn(
+            "Unofficial TelegramNewsAI",
+            readme,
+        )
+        self.assertNotIn("--setup-semantic", readme)
 
     def test_user_facing_source_documentation_matches_fallback_order(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -1005,10 +1136,29 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("Get-PythonVersion", installer)
         self.assertIn("$venvDir.unsupported-", installer)
 
+    def test_user_facing_branding_is_unofficial(self):
+        self.assertEqual(
+            collector.APP_DISPLAY_NAME,
+            "Unofficial TelegramNewsAI",
+        )
+        launcher = (
+            ROOT / "launcher" / "Telegram_Digest.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'AssemblyTitle("Unofficial TelegramNewsAI")',
+            launcher,
+        )
+        build_launcher = (
+            ROOT / "launcher" / "build_launcher.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("/win32icon:", build_launcher)
+
     def test_release_builder_uses_exact_maintenance_distribution(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
         for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'"):
             self.assertIn(required, builder)
+        self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)
+        self.assertIn("launcher\\build_launcher.ps1", builder)
         self.assertNotIn("'.gitignore'", builder)
 
     def test_ci_verifies_and_uploads_the_release_artifact(self):
@@ -1051,7 +1201,7 @@ class OfflineRegressionTests(unittest.TestCase):
                 self.assertNotIn("category", message)
 
     def test_topic_search_request_uses_human_sources(self):
-        request = collector.build_search_ai_instruction(
+        request = collector.build_search_digest_instruction(
             "проверочная тема",
             7,
             {},
@@ -1069,7 +1219,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(request), 5500)
 
     def test_editorial_requests_do_not_depend_on_chatgpt_ui(self):
-        requests = collector.DIGEST_REQUEST + collector.build_search_ai_instruction(
+        requests = collector.DIGEST_REQUEST + collector.build_search_digest_instruction(
             "проверочная тема", 7, {}
         )
         self.assertNotIn("ChatGPT", requests)
@@ -1094,10 +1244,10 @@ class OfflineRegressionTests(unittest.TestCase):
             [], [], [], 0, 0, 6, channels, sync_stats, None, None, [], self.settings
         )
         payload = __import__("json").loads(latest.read_text(encoding="utf-8"))
-        self.assertEqual(payload["meta"]["schema_version"], 6)
-        self.assertEqual(payload["meta"]["digest_profile_version"], "6.0")
-        self.assertIn("recommended_ai_request", payload["meta"])
-        self.assertNotIn("recommended_chatgpt_request", payload["meta"])
+        self.assertEqual(payload["meta"]["schema_version"], 7)
+        self.assertEqual(payload["meta"]["digest_profile_version"], "7.0")
+        self.assertIn("recommended_digest_request", payload["meta"])
+        self.assertNotIn("recommended_ai_request", payload["meta"])
         self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
 
 
