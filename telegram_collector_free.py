@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.10 Stable"
+APP_VERSION = "5.4.11 Testing"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Меняются только при несовместимом изменении контракта или инструкций.
@@ -149,6 +149,15 @@ DEFAULT_SETTINGS = {
     # библиотека пережидает сама, более длинные попадают в наш retry-код.
     "telethon_flood_sleep_threshold_seconds": 60,
 
+    # Консервативный профиль Telegram API на период тестирования.
+    # wait_time задаёт паузу между последовательными GetHistoryRequest
+    # внутри iter_messages; межканальная пауза сглаживает пики запросов.
+    "history_request_wait_seconds": 1.0,
+    "inter_channel_delay_seconds": 0.75,
+    "bulk_channel_threshold": 50,
+    "bulk_inter_channel_delay_seconds": 1.5,
+    "flood_wait_safety_seconds": 5,
+
     "open_output_folder": True,
 
     "archive_retention_days": 7,
@@ -220,6 +229,41 @@ def load_settings():
         "open_html_preview": False,
         "refresh_recent_messages": max(0, min(100, int(result.get("refresh_recent_messages", 50)))),
         "refresh_recent_hours": max(0, float(result.get("refresh_recent_hours", 2))),
+        "history_request_wait_seconds": max(
+            0.5,
+            min(
+                5.0,
+                float(result.get("history_request_wait_seconds", 1.0)),
+            ),
+        ),
+        "inter_channel_delay_seconds": max(
+            0.0,
+            min(
+                10.0,
+                float(result.get("inter_channel_delay_seconds", 0.75)),
+            ),
+        ),
+        "bulk_channel_threshold": max(
+            10,
+            min(
+                500,
+                int(result.get("bulk_channel_threshold", 50)),
+            ),
+        ),
+        "bulk_inter_channel_delay_seconds": max(
+            0.0,
+            min(
+                30.0,
+                float(result.get("bulk_inter_channel_delay_seconds", 1.5)),
+            ),
+        ),
+        "flood_wait_safety_seconds": max(
+            1,
+            min(
+                60,
+                int(result.get("flood_wait_safety_seconds", 5)),
+            ),
+        ),
     })
 
     # Записываем новые параметры в существующий settings_free.json,
@@ -273,6 +317,73 @@ def log_info(message):
 
 def log_error(message):
     LOGGER.error(message)
+
+
+def history_request_wait_seconds(settings):
+    """Консервативная пауза между последовательными запросами истории."""
+    try:
+        value = float(
+            (settings or DEFAULT_SETTINGS).get(
+                "history_request_wait_seconds",
+                1.0,
+            )
+        )
+    except (TypeError, ValueError):
+        value = 1.0
+    return max(0.5, min(5.0, value))
+
+
+def inter_channel_delay_seconds(settings, channel_count):
+    """Пауза между каналами; для больших списков автоматически больше."""
+    source = settings or DEFAULT_SETTINGS
+    try:
+        normal = float(
+            source.get(
+                "inter_channel_delay_seconds",
+                0.75,
+            )
+        )
+    except (TypeError, ValueError):
+        normal = 0.75
+
+    try:
+        bulk = float(
+            source.get(
+                "bulk_inter_channel_delay_seconds",
+                1.5,
+            )
+        )
+    except (TypeError, ValueError):
+        bulk = 1.5
+
+    try:
+        threshold = int(
+            source.get(
+                "bulk_channel_threshold",
+                50,
+            )
+        )
+    except (TypeError, ValueError):
+        threshold = 50
+
+    normal = max(0.0, min(10.0, normal))
+    bulk = max(normal, min(30.0, bulk))
+    threshold = max(10, min(500, threshold))
+
+    return bulk if int(channel_count) > threshold else normal
+
+
+def flood_wait_safety_seconds(settings):
+    try:
+        value = int(
+            (settings or DEFAULT_SETTINGS).get(
+                "flood_wait_safety_seconds",
+                5,
+            )
+        )
+    except (TypeError, ValueError):
+        value = 5
+    return max(1, min(60, value))
 
 
 # ============================================================
@@ -456,6 +567,17 @@ def load_or_create_credentials():
     print("ограничение или блокировку аккаунта невозможно.")
     print("Если доступ к этому аккаунту критичен, сначала прочитайте")
     print("раздел README «Риск ограничений Telegram API».\n")
+
+    while True:
+        confirmation = input(
+            "Enter — понимаю риск и продолжить; 0 — выйти: "
+        ).strip()
+        if is_back_command(confirmation):
+            raise SystemExit(0)
+        if not confirmation:
+            break
+        print("Нажмите Enter для продолжения или 0 для выхода.")
+
     print("Для подключения нужны API ID и API Hash.")
     print(
         "Получить их можно: "
@@ -691,8 +813,13 @@ async def prompt_add_public_channels(client, items):
 
     added = 0
     updated = 0
+    public_parts = [
+        part.strip()
+        for part in raw.split(",")
+        if part.strip()
+    ]
 
-    for part in raw.split(","):
+    for part_index, part in enumerate(public_parts, 1):
         part = part.strip()
         if not part:
             continue
@@ -717,6 +844,9 @@ async def prompt_add_public_channels(client, items):
 
         except Exception as e:
             print(f"  Не добавлен {part}: {e}")
+
+        if part_index < len(public_parts):
+            await asyncio.sleep(0.5)
 
     items = dedupe_channel_items(items)
 
@@ -940,7 +1070,7 @@ async def select_from_subscriptions(client, subscribed):
 
         if public_values:
             print("\nДобавляю публичные каналы из этой же строки:")
-            for raw_value in public_values:
+            for public_index, raw_value in enumerate(public_values, 1):
                 try:
                     item = await resolve_public_channel(
                         client,
@@ -965,6 +1095,9 @@ async def select_from_subscriptions(client, subscribed):
                     )
                 else:
                     print(f"  Уже есть: {item['name']}")
+
+                if public_index < len(public_values):
+                    await asyncio.sleep(0.5)
 
         items = dedupe_channel_items(items)
         if not items:
@@ -2982,7 +3115,8 @@ async def sync_channel_once(
 
         if first_sync:
             async for msg in client.iter_messages(
-                channel["entity"]
+                channel["entity"],
+                wait_time=history_request_wait_seconds(settings),
             ):
                 if (
                     getattr(msg, "date", None)
@@ -3024,6 +3158,7 @@ async def sync_channel_once(
             async for msg in client.iter_messages(
                 channel["entity"],
                 min_id=last_message_id,
+                wait_time=history_request_wait_seconds(settings),
             ):
                 stats["scanned"] += 1
                 max_seen_id = max(
@@ -3064,6 +3199,7 @@ async def sync_channel_once(
             async for msg in client.iter_messages(
                 channel["entity"],
                 limit=refresh_limit,
+                wait_time=history_request_wait_seconds(settings),
             ):
                 refresh_hours = float(settings.get('refresh_recent_hours', 2))
                 if refresh_hours > 0 and getattr(msg, 'date', None) and msg.date < refresh_cutoff:
@@ -3184,6 +3320,7 @@ async def sync_channel_with_retries(
     )
 
     last_error = None
+    halt_sync = False
 
     for attempt in range(
         1,
@@ -3220,10 +3357,16 @@ async def sync_channel_with_retries(
                     f"{last_error}"
                 )
                 await asyncio.sleep(
-                    e.seconds + 1
+                    e.seconds
+                    + flood_wait_safety_seconds(settings)
                 )
                 continue
 
+            halt_sync = True
+            log_error(
+                f"{channel['name']}: {last_error}; "
+                "синхронизация остановлена для защиты аккаунта."
+            )
             break
 
         except Exception as e:
@@ -3267,6 +3410,7 @@ async def sync_channel_with_retries(
         "scanned": 0,
         "status": "error",
         "error": last_error,
+        "halt_sync": halt_sync,
     }
 
 
@@ -3278,6 +3422,26 @@ async def sync_all_channels(
     settings,
 ):
     overall = init_sync_stats()
+    started_at = time.monotonic()
+    total_channels = len(channels)
+    channel_delay = inter_channel_delay_seconds(
+        settings,
+        total_channels,
+    )
+    history_wait = history_request_wait_seconds(settings)
+
+    overall["api_safety"] = {
+        "history_request_wait_seconds": history_wait,
+        "inter_channel_delay_seconds": channel_delay,
+        "halted_by_flood_wait": False,
+    }
+
+    log_info(
+        "SYNC_START | "
+        f"channels={total_channels} | hours={hours} | "
+        f"history_wait={history_wait:.2f}s | "
+        f"channel_delay={channel_delay:.2f}s"
+    )
 
     print(
         "\nСинхронизирую Telegram с локальной базой..."
@@ -3367,6 +3531,34 @@ async def sync_all_channels(
                 f"      ОШИБКА — "
                 f"{result.get('error')}"
             )
+
+        if result.get("halt_sync"):
+            overall["api_safety"][
+                "halted_by_flood_wait"
+            ] = True
+            print(
+                "      ЗАЩИТНАЯ ОСТАНОВКА: Telegram запросил "
+                "слишком длинную паузу. Остальные каналы "
+                "в этом запуске не запрашиваются."
+            )
+            break
+
+        if index < total_channels and channel_delay > 0:
+            await asyncio.sleep(channel_delay)
+
+    overall["duration_seconds"] = round(
+        time.monotonic() - started_at,
+        3,
+    )
+    log_info(
+        "SYNC_END | "
+        f"channels_done={len(overall['channel_results'])}/"
+        f"{total_channels} | "
+        f"failed={overall['failed_channels']} | "
+        f"scanned={overall['telegram_messages_scanned']} | "
+        f"halted={overall['api_safety']['halted_by_flood_wait']} | "
+        f"duration={overall['duration_seconds']:.3f}s"
+    )
 
     return overall
 
@@ -3503,6 +3695,7 @@ async def backfill_channel_history_once(
 
     async for msg in client.iter_messages(
         channel["entity"],
+        wait_time=history_request_wait_seconds(settings),
         **kwargs,
     ):
         scanned += 1
@@ -3624,6 +3817,7 @@ async def backfill_channel_history_with_retries(
     )
 
     last_error = None
+    halt_sync = False
 
     for attempt in range(
         1,
@@ -3650,10 +3844,16 @@ async def backfill_channel_history_with_retries(
                     f"{e.seconds} сек.; повторю..."
                 )
                 await asyncio.sleep(
-                    e.seconds + 1
+                    e.seconds
+                    + flood_wait_safety_seconds(settings)
                 )
                 continue
 
+            halt_sync = True
+            log_error(
+                f"BACKFILL {channel['name']}: {last_error}; "
+                "догрузка истории остановлена для защиты аккаунта."
+            )
             break
 
         except Exception as e:
@@ -3689,6 +3889,7 @@ async def backfill_channel_history_with_retries(
         "earliest_utc": None,
         "latest_utc": None,
         "error": last_error,
+        "halt_sync": halt_sync,
     }
 
 
@@ -3747,6 +3948,11 @@ async def _v4_ensure_history_for_search(
     )
 
     results = []
+    total_channels = len(channels)
+    channel_delay = inter_channel_delay_seconds(
+        settings,
+        total_channels,
+    )
 
     for index, channel in enumerate(
         channels,
@@ -3781,6 +3987,16 @@ async def _v4_ensure_history_for_search(
                 f"      НЕПОЛНО: "
                 f"{result.get('error') or 'не удалось подтвердить покрытие'}"
             )
+
+        if result.get("halt_sync"):
+            print(
+                "      ЗАЩИТНАЯ ОСТАНОВКА: остальные каналы "
+                "истории в этом запуске не запрашиваются."
+            )
+            break
+
+        if index < total_channels and channel_delay > 0:
+            await asyncio.sleep(channel_delay)
 
     complete_channels = sum(
         1 for x in results
