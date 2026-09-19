@@ -5,11 +5,11 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("TelegramNewsAI")]
-[assembly: AssemblyDescription("Запуск TelegramNewsAI 5.4.6")]
-[assembly: AssemblyProduct("TelegramNewsAI")]
-[assembly: AssemblyVersion("5.4.6.0")]
-[assembly: AssemblyFileVersion("5.4.6.0")]
+[assembly: AssemblyTitle("Unofficial TelegramNewsAI")]
+[assembly: AssemblyDescription("Запуск Unofficial TelegramNewsAI 5.4.12 Testing")]
+[assembly: AssemblyProduct("Unofficial TelegramNewsAI")]
+[assembly: AssemblyVersion("5.4.12.0")]
+[assembly: AssemblyFileVersion("5.4.12.0")]
 
 internal static class Program
 {
@@ -28,8 +28,8 @@ internal static class Program
         if (!File.Exists(script))
         {
             MessageBox.Show(
-                "Не найден start_free.bat. Поместите EXE рядом с остальными файлами TelegramNewsAI.",
-                "TelegramNewsAI", MessageBoxButtons.OK, MessageBoxIcon.Information
+                "Не найден start_free.bat. Поместите EXE рядом с остальными файлами Unofficial TelegramNewsAI.",
+                "Unofficial TelegramNewsAI", MessageBoxButtons.OK, MessageBoxIcon.Information
             );
             return 2;
         }
@@ -52,7 +52,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Не удалось запустить TelegramNewsAI",
+            MessageBox.Show(ex.Message, "Не удалось запустить Unofficial TelegramNewsAI",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
