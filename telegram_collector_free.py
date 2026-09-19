@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unofficial TelegramNewsAI — локальный сбор, история и поиск Telegram-публикаций.
+"""Unofficial Telegram News Digest — локальный сбор, история и поиск Telegram-публикаций.
 Дайджест загружает новые сообщения и недостающую историю выбранного периода.
 Поиск предлагает обновление; локальный режим показывает актуальность базы.
 Полные тексты сохраняются без квот на каналы и без ограничения выдачи.
@@ -39,13 +39,12 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.12 Testing"
-APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
+APP_VERSION = "5.4.13 Testing"
+APP_DISPLAY_NAME = "Unofficial Telegram News Digest"
 
-# Версии экспортируемого JSON независимы от версии приложения.
-# Меняются только при несовместимом изменении контракта или инструкций.
-EXPORT_SCHEMA_VERSION = 7
-DIGEST_PROFILE_VERSION = "7.0"
+# Версия экспортируемого JSON независима от версии приложения.
+# Меняется только при несовместимом изменении контракта.
+EXPORT_SCHEMA_VERSION = 8
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -4428,66 +4427,8 @@ def split_operational(
 # Output / cleanup
 # ============================================================
 
-EDITORIAL_PRINCIPLES = (
-    "Для этого дайджеста игнорируй сведения о пользователе, персональную память, историю текущего и прошлых чатов, ранее "
-    "обсуждавшиеся интересы, цели и предпочтения: они не являются источником фактов и не должны влиять на отбор, порядок, "
-    "акценты или оценку полезности материала. Не пиши «для вас», «вам особенно важно» и подобные персональные оценки. "
-    "Тематика заранее неизвестна: определяй темы, порядок и глубину только по фактическому материалу текущей выгрузки, без "
-    "фиксированных рубрик и географических приоритетов. Объединяй связанные публикации в сюжеты, учитывай хронологию и поздние "
-    "уточнения, не пересказывай сообщения по очереди. Различай прямое сообщение, независимое подтверждение, официальное "
-    "заявление, пересказ названного первоисточника, инсайд, версию и собственный редакционный вывод. Если канал ссылается на "
-    "Reuters, BBC, ведомство, конкретного человека или другой названный первоисточник, укажи это естественно. Не превращай "
-    "утверждение в факт из-за статуса источника; важный одиночный инсайд можно включить с ясной атрибуцией. Расходящиеся версии "
-    "сопоставляй без самовольного выбора победителя, а перепечатки одного исходного сообщения не считай независимыми "
-    "подтверждениями. Не достраивай отсутствующие факты, включая автора действия, мотив, цель и причинность. Контекст или вывод "
-    "добавляй только когда он прямо следует из материала и нужен для понимания; если факты самодостаточны, не дописывай "
-    "обязательную аналитику и не ранжируй событие по значимости без опоры на материал. Внешние источники используй точечно для "
-    "первоисточника, документа, точной цифры или необходимого контекста. Служебные поля используй только для внутреннего "
-    "сопоставления; в готовом ответе их и технический процесс не показывай. Не обсуждай файл, JSON, локальную базу, "
-    "синхронизацию, дедупликацию или алгоритм поиска. Пиши плотно и профессионально; точность важнее эффектности. Сохраняй "
-    "имена, даты, числа и степень уверенности исходных сообщений. Заголовки делай короткими и не сильнее подтверждённых данных. "
-    "Охвати все содержательно значимые сюжеты; второстепенные, но полезные события можно собрать компактно. "
-)
-
-
-SOURCE_RULES = (
-    "Каждый самостоятельный фактический сюжет должен завершаться строкой источника, если доступен telegram_url или channel_url. "
-    "Строка источника должна быть последней строкой сюжета: после неё не добавляй новых фактических утверждений. Если под одним "
-    "заголовком объединены факты из разных публикаций, финальная строка источников должна покрывать все существенные "
-    "утверждения; иначе раздели материал на отдельные сюжеты или пункты с собственными источниками. В блоке несвязанных коротких "
-    "событий ставь источник непосредственно после каждого события и не собирай общий список ссылок в конце блока. Пункты "
-    "«Главное за период» могут не дублировать ссылки, если эти сюжеты ниже имеют источники. При наличии telegram_url "
-    "название канала делай единственной Markdown-ссылкой на конкретный пост; иначе используй channel_url, а при отсутствии обеих "
-    "ссылок — обычное название. URL не придумывай. Для простого сюжета обычно достаточно одного содержательного источника; для "
-    "составного используй 2–3 ключевые ссылки и не выдавай одну ссылку за подтверждение фактов, которых в ней нет. Не перечисляй "
-    "одинаковые перепечатки. Формат: **Источник:** [Канал](url) или **Источники:** [Канал A](url) · [Канал B](url). "
-)
-
-
-DIGEST_REQUEST = (
-    "Подготовь итоговый редакторский дайджест за выбранный период. У точных повторов inherited_fields восстанавливай из "
-    "родительской публикации по inherits_from_message_key. Основной дайджест всегда строй по всему содержательному материалу "
-    "текущей выгрузки из news_messages и operational_messages за выбранный период. changes_since_previous_digest — только "
-    "дополнительный слой сравнения: он не задаёт временные границы основного дайджеста, не заменяет его и не является фильтром "
-    "отбора. Если changes_since_previous_digest.comparison_available=true, используй его ссылки только для определения новых и "
-    "содержательно изменённых публикаций и, при существенных изменениях, для отдельного блока «Что изменилось». Сообщения, уже "
-    "присутствовавшие в предыдущем выпуске, не исключай из основного дайджеста, если они нужны для полной картины выбранного "
-    "периода. Изменение одних просмотров, реакций, пересылок или комментариев новой новостью не считай. Используй "
-    "related_message_groups для распознавания перепечаток и общего источника, сохраняя содержательные различия. "
-    + EDITORIAL_PRINCIPLES +
-    SOURCE_RULES +
-    "В заголовке укажи дату и фактический локальный интервал всего охваченного материала по date_local, а не только сообщений "
-    "из блока сравнения; если надёжно определить интервал нельзя, не придумывай. При насыщенном материале после заголовка сразу "
-    "переходи к «Главное за период» из нескольких очень коротких пунктов; не ставь перед ним второй абзац с тем же резюме. Если "
-    "важных событий мало, этот блок не нужен. Затем раскрой сюжеты по важности или естественной хронологии; глубину определяй "
-    "количеством реально новой информации, обычно 1–3 компактными абзацами. Не повторяй подробно то, что уже сказано в кратком "
-    "блоке. Однотипные оперативные предупреждения одного сюжета объединяй. Если последствия не подтверждены, сохраняй "
-    "неопределённость. После «Главное за период» не добавляй повторный итог, личный выбор или рейтинг. «Что изменилось» не "
-    "заменяет основной дайджест и добавляется только при доступном сравнении и существенных изменениях; открытые вопросы — только "
-    "по материалу. Не объясняй читателю внутренние правила охвата и сравнения: молча применяй полный период основного выпуска "
-    "и дополнительную роль блока изменений, не комментируя их в готовом тексте. Отсутствие новых сообщений не считай событием. "
-)
-
+# Экспорт намеренно не содержит встроенных инструкций для AI/ML.
+# Программа собирает, очищает и структурирует данные локально.
 
 def calculate_change_summary(messages):
     result = {
@@ -4744,7 +4685,7 @@ def _v4_save_output(
             },
 
             "schema_version": EXPORT_SCHEMA_VERSION,
-            "artifact_type": "telegram_news_digest",
+            "artifact_type": "telegram_period_export",
             "history_completeness": sync_stats.get("history_completeness", {}),
             "sync_quality": {
                 "complete": (
@@ -4823,15 +4764,12 @@ def _v4_save_output(
                 )
             ),
 
-            "digest_profile_version": DIGEST_PROFILE_VERSION,
-            "recommended_digest_request": (
-                DIGEST_REQUEST
-            ),
             "content_use_notice": (
-                "Файл создан локально. Программа сама не передаёт Telegram-"
-                "контент внешним AI/ML-сервисам. Дальнейшее использование "
-                "должно соответствовать правилам Telegram, правам авторов "
-                "и применимому законодательству."
+                "Локальный структурированный экспорт. Он не содержит "
+                "встроенных инструкций для AI/ML и программа сама не "
+                "передаёт его внешним сервисам. Используйте данные только "
+                "в пределах правил Telegram, прав авторов и применимого "
+                "законодательства."
             ),
         },
 
@@ -5616,23 +5554,6 @@ def safe_filename_fragment(value, max_len=48):
     return value[:max_len].rstrip("._ ")
 
 
-def build_search_digest_instruction(question, effective_days, search_result):
-    return (
-        "Подготовь профессиональный тематический обзор по вопросу: "
-        f"«{question}». Период: последние {effective_days} дней. Если пользователь после загрузки пишет только «дайджест», "
-        "отвечай именно по этой теме, а не по всей повестке. search_results содержат основные найденные публикации; "
-        "related_context используй только как связанный контекст; related_message_groups помогают распознавать перепечатки "
-        "и общий источник. Совпадения, найденные по смыслу, включай только после проверки их фактической связи с вопросом. "
-        "Если история за период неполна, кратко предупреди об этом человеческим языком без технических деталей. "
-        + EDITORIAL_PRINCIPLES +
-        SOURCE_RULES +
-        "Начни с 1–3 предложений о состоянии темы в целом, затем раскрой события по естественной хронологии или смысловым "
-        "подтемам. Покажи ключевые изменения, важные версии и расхождения, не создавая искусственную многоуровневую "
-        "структуру при малом количестве материала. Если из данных естественно следуют открытые вопросы, кратко укажи, что "
-        "важно отслеживать дальше. "
-    )
-
-
 def _v4_save_search_output(conn, question, days, settings, db_maintenance, channels=None, history_status=None, search_result=None):
     channel_ids = [
         int(ch["id"])
@@ -5660,7 +5581,7 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
 
     payload = {
         "meta": {
-            "artifact_type": "telegram_topic_search_digest",
+            "artifact_type": "telegram_topic_search_export",
             "collector_version": APP_VERSION,
             "schema_version": EXPORT_SCHEMA_VERSION,
             "created_local": now.isoformat(timespec="seconds"),
@@ -5713,17 +5634,13 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
             },
             "usage_hint": (
                 "Локальный структурированный JSON-экспорт результатов поиска. "
-                "Вопрос, период и редакционная инструкция уже записаны внутри файла."
-            ),
-            "recommended_digest_request": build_search_digest_instruction(
-                result["question"],
-                result["effective_days"],
-                result,
+                "Вопрос и период уже записаны внутри файла."
             ),
             "content_use_notice": (
-                "Программа сама не передаёт Telegram-контент внешним AI/ML-"
-                "сервисам. Дальнейшее использование файла должно соответствовать "
-                "правилам Telegram, правам авторов и применимому законодательству."
+                "Экспорт не содержит встроенных инструкций для AI/ML и программа "
+                "сама не передаёт его внешним сервисам. Используйте данные только "
+                "в пределах правил Telegram, прав авторов и применимого "
+                "законодательства."
             ),
         },
         "search_overview": {
@@ -6666,8 +6583,9 @@ async def _v4_main():
             )
 
         print(
-            "\nФайл сохранён локально. Программа сама не передаёт "
-            "Telegram-контент внешним сервисам."
+            "\nФайл сохранён локально. Экспорт не содержит встроенных "
+            "инструкций для AI/ML и программа сама не передаёт его "
+            "внешним сервисам."
         )
 
         if settings.get(
@@ -6747,7 +6665,7 @@ class InstanceLock:
             if error == self.ERROR_ALREADY_EXISTS:
                 kernel32.CloseHandle(handle)
                 raise RuntimeError(
-                    'Unofficial TelegramNewsAI уже запущен в другом окне или из другой папки. '
+                    'Unofficial Telegram News Digest уже запущен в другом окне или из другой папки. '
                     'Закройте предыдущий экземпляр и повторите запуск.'
                 )
 
@@ -7592,7 +7510,7 @@ def save_search_output(conn, question, days, settings, db_maintenance, channels=
 PREVIEW_HTML=r'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
-<title>Unofficial TelegramNewsAI · Просмотр</title><style>
+<title>Unofficial Telegram News Digest · Просмотр</title><style>
 :root{color-scheme:light;--ink:#1c293d;--muted:#607086;--blue:#2463ac;--line:#dce5ef}
 *{box-sizing:border-box}body{margin:0;background:#f3f6fa;color:var(--ink);font:16px/1.6 'Segoe UI',Arial,sans-serif}
 header{background:#142a43;color:white;padding:30px max(24px,calc((100vw - 1100px)/2));border-bottom:5px solid #64b4d4}
@@ -7608,7 +7526,7 @@ a{color:var(--blue)}details{border-top:1px solid var(--line);margin-top:13px;pad
 button{border:1px solid #b9c9db;border-radius:8px;padding:10px 18px;background:white;color:var(--blue);cursor:pointer}footer{padding:28px 0;color:var(--muted);font-size:12px}
 @media(max-width:750px){.toolbar{grid-template-columns:1fr 1fr}header{padding:22px}h1{font-size:24px}main{padding:0 14px}article{padding:16px}}
 @media print{.toolbar,button{display:none}header{background:white;color:black}article{break-inside:avoid}}
-</style></head><body><header><div class="eyebrow" id="eyebrow">UNOFFICIAL TELEGRAMNEWSAI</div><h1 id="title">Лента публикаций</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
+</style></head><body><header><div class="eyebrow" id="eyebrow">UNOFFICIAL TELEGRAM NEWS DIGEST</div><h1 id="title">Лента публикаций</h1><p id="subtitle">Публикации, источники и история изменений</p></header>
 <main><div id="quality" class="status"></div><details id="coverage"><summary>Полнота истории по каналам</summary><div id="coverageBody"></div></details>
 <div class="toolbar"><label>Найти в результатах<input id="query" placeholder="Слово, имя или фраза"></label><label>Канал<select id="channel"><option value="">Все каналы</option></select></label>
 <label>Состояние<select id="state"><option value="">Все сообщения</option><option value="new">Новые</option><option value="edited">Исправленные</option><option value="unavailable">Недоступные</option><option value="operational">Оперативные</option><option value="semantic">По смыслу</option></select></label>
@@ -7620,7 +7538,7 @@ button{border:1px solid #b9c9db;border-radius:8px;padding:10px 18px;background:w
 const payload=JSON.parse(document.getElementById('payload').textContent),meta=payload.meta||{};
 const $=id=>document.getElementById(id);
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n};
-$('eyebrow').textContent='UNOFFICIAL TELEGRAMNEWSAI'+(meta.collector_version?' · '+meta.collector_version:'');
+$('eyebrow').textContent='UNOFFICIAL TELEGRAM NEWS DIGEST'+(meta.collector_version?' · '+meta.collector_version:'');
 const messages=[...(payload.news_messages||[]),...(payload.operational_messages||[]).map(m=>({...m,operational:true})),...(payload.search_results||[]),...(payload.related_context||[])];
 const history=meta.history_completeness||{},quality=$('quality');
 quality.classList.toggle('warn',history.complete!==true);

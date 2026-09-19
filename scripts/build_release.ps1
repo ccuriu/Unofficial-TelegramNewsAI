@@ -10,7 +10,7 @@ if (-not $versionMatch) { throw 'Could not determine APP_VERSION.' }
 $versionRaw = $versionMatch.Matches[0].Groups[1].Value
 $channel = if ($versionRaw -match '\s+Testing$') { 'Testing' } else { 'Stable' }
 $version = $versionRaw -replace '\s+(Stable|Testing)$', '' -replace '[^0-9A-Za-z._-]', '_'
-$packageName = "Unofficial-TelegramNewsAI-$version-$channel-Windows"
+$packageName = "Unofficial-Telegram-News-Digest-$version-$channel-Windows"
 $package = [IO.Path]::GetFullPath((Join-Path $output $packageName))
 $zip = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.zip')))
 $zipChecksum = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.sha256.txt')))
