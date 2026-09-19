@@ -71,7 +71,10 @@ jobs:
       - name: Compile and self-test launcher source
         shell: powershell
         run: |
-          $compiled = "$env:RUNNER_TEMP\Telegram_Digest.exe"
+          $launcherDir = Join-Path $env:RUNNER_TEMP 'launcher-self-test'
+          New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
+          Copy-Item .\start_free.bat (Join-Path $launcherDir 'start_free.bat') -Force
+          $compiled = Join-Path $launcherDir 'Telegram_Digest.exe'
           .\launcher\build_launcher.ps1 -OutputPath $compiled
           $process = Start-Process $compiled -ArgumentList '--self-test' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Compiled launcher self-test failed: $($process.ExitCode)" }
