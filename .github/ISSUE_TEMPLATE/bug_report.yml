@@ -1,5 +1,5 @@
 name: Ошибка программы
-description: Сообщить о воспроизводимой проблеме Unofficial Telegram News Digest
+description: Сообщить о воспроизводимой проблеме TelegramNewsAI
 title: "[Bug] "
 labels: ["bug"]
 body:
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Версия Unofficial Telegram News Digest
+      label: Версия TelegramNewsAI
       placeholder: "например 5.4.6 Stable"
     validations:
       required: true
