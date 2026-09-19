@@ -229,6 +229,25 @@ def load_settings():
         "open_html_preview": False,
         "refresh_recent_messages": max(0, min(100, int(result.get("refresh_recent_messages", 50)))),
         "refresh_recent_hours": max(0, float(result.get("refresh_recent_hours", 2))),
+        "max_flood_wait_seconds": max(
+            0,
+            min(
+                60,
+                int(result.get("max_flood_wait_seconds", 60)),
+            ),
+        ),
+        "telethon_flood_sleep_threshold_seconds": max(
+            0,
+            min(
+                60,
+                int(
+                    result.get(
+                        "telethon_flood_sleep_threshold_seconds",
+                        60,
+                    )
+                ),
+            ),
+        ),
         "history_request_wait_seconds": max(
             0.5,
             min(
