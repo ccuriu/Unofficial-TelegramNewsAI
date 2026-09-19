@@ -7,8 +7,10 @@ $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
 $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
 $versionMatch = Select-String -LiteralPath (Join-Path $root 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"'
 if (-not $versionMatch) { throw 'Could not determine APP_VERSION.' }
-$version = $versionMatch.Matches[0].Groups[1].Value -replace '\s+Stable$', '' -replace '[^0-9A-Za-z._-]', '_'
-$packageName = "TelegramNewsAI-$version-Stable-Windows"
+$versionRaw = $versionMatch.Matches[0].Groups[1].Value
+$channel = if ($versionRaw -match '\s+Testing$') { 'Testing' } else { 'Stable' }
+$version = $versionRaw -replace '\s+(Stable|Testing)$', '' -replace '[^0-9A-Za-z._-]', '_'
+$packageName = "TelegramNewsAI-$version-$channel-Windows"
 $package = [IO.Path]::GetFullPath((Join-Path $output $packageName))
 $zip = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.zip')))
 $zipChecksum = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.sha256.txt')))
