@@ -959,190 +959,6 @@ class OfflineRegressionTests(unittest.TestCase):
             ["https://t.me/channel_a/10", "https://t.me/channel_b/20"],
         )
 
-    def test_digest_request_uses_telegram_urls_for_sources(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("telegram_url", request)
-        self.assertIn("channel_url", request)
-        self.assertIn("Markdown-ссылкой", request)
-        self.assertIn("При наличии telegram_url", request)
-        self.assertIn("иначе используй channel_url", request)
-        self.assertIn("при отсутствии обеих ссылок", request)
-        self.assertIn("URL не придумывай", request)
-        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", request)
-        self.assertIn("2–3 ключевые ссылки", request)
-
-    def test_user_instructions_have_no_separate_post_link_or_color_markers(self):
-        requests = (
-            collector.EDITORIAL_PRINCIPLES
-            + collector.SOURCE_RULES
-            + collector.DIGEST_REQUEST
-        )
-        for phrase in (
-            "Открыть публикацию",
-            "Открыть пост",
-            "Читать оригинал",
-            "Перейти к сообщению",
-        ):
-            self.assertNotIn(phrase, requests)
-        for marker in ("🔵", "🟢", "🟣", "🟠", "🟡", "🟤", "⚪", "🔴"):
-            self.assertNotIn(marker, requests)
-
-    def test_prompt_has_no_attachment_citation_hacks(self):
-        self.assertFalse(hasattr(collector, "NO_ATTACHMENT_CITATIONS_RULE"))
-        request = collector.DIGEST_REQUEST.lower()
-        self.assertNotIn("file citations", request)
-        self.assertNotIn("source chips", request)
-        self.assertNotIn("citation вложения", request)
-        self.assertNotIn("дайджест_последний", request)
-        self.assertNotIn("поиск_последний", request)
-
-    def test_digest_request_hides_technical_process(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("Служебные поля", request)
-        self.assertIn("в готовом ответе", request)
-        self.assertIn("Не обсуждай файл, JSON, локальную базу", request)
-        self.assertIn("changes_since_previous_digest", request)
-        self.assertIn("related_message_groups", request)
-        self.assertIn("inherits_from_message_key", request)
-
-    def test_digest_request_is_topic_neutral_and_automatic(self):
-        request = collector.DIGEST_REQUEST.lower()
-        for fixed_topic in ("харьков", "украина", "война"):
-            self.assertNotIn(fixed_topic, request)
-        self.assertIn("тематика заранее неизвестна", request)
-        self.assertIn("без фиксированных рубрик", request)
-        self.assertIn("по фактическому материалу", request)
-        self.assertIn("заголовки делай короткими", request)
-
-    def test_digest_request_limits_editorial_inference(self):
-        request = collector.DIGEST_REQUEST.lower()
-        self.assertIn("различай прямое сообщение", request)
-        self.assertIn("независимое подтверждение", request)
-        self.assertIn("редакционный вывод", request)
-        self.assertIn("не достраивай отсутствующие факты", request)
-        self.assertIn("автора действия, мотив, цель и причинность", request)
-        self.assertIn("перепечатки одного исходного сообщения не считай независимыми подтверждениями", request)
-
-    def test_digest_request_keeps_adaptive_compact_structure(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("«Главное за период»", request)
-        self.assertIn("не ставь перед ним второй абзац с тем же резюме", request)
-        self.assertIn("Однотипные оперативные предупреждения одного сюжета объединяй", request)
-        self.assertIn("changes_since_previous_digest.comparison_available=true", request)
-        self.assertIn("глубину определяй количеством реально новой информации", request)
-        self.assertNotIn("при среднем объёме", request.lower())
-        self.assertNotIn("при большом", request.lower())
-
-    def test_digest_comparison_never_replaces_full_period(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("Основной дайджест всегда строй по всему содержательному материалу", request)
-        self.assertIn("changes_since_previous_digest — только дополнительный слой сравнения", request)
-        self.assertIn("не задаёт временные границы основного дайджеста", request)
-        self.assertIn("не является фильтром отбора", request)
-        self.assertIn("не исключай из основного дайджеста", request)
-
-    def test_digest_hides_internal_coverage_and_comparison_rules(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("Не объясняй читателю внутренние правила охвата и сравнения", request)
-        self.assertIn("молча применяй полный период основного выпуска", request)
-        self.assertIn("не комментируя их в готовом тексте", request)
-        self.assertEqual(request.count("Не объясняй читателю внутренние правила охвата и сравнения"), 1)
-        self.assertIn("всего охваченного материала по date_local", request)
-        self.assertIn("а не только сообщений из блока сравнения", request)
-        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
-        self.assertEqual(request.count("changes_since_previous_digest — только дополнительный слой сравнения"), 1)
-        self.assertEqual(request.count("«Что изменилось» не заменяет основной дайджест"), 1)
-
-    def test_digest_does_not_end_with_subjective_second_summary(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("не добавляй повторный итог, личный выбор или рейтинг", request)
-        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
-        self.assertNotIn("что я бы выделил", request.lower())
-        self.assertNotIn("мой выбор", request.lower())
-
-    def test_digest_title_uses_actual_local_period(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn("В заголовке укажи дату", request)
-        self.assertIn("фактический локальный интервал", request)
-        self.assertIn("date_local", request)
-        self.assertIn("если надёжно определить интервал нельзя, не придумывай", request)
-
-    def test_source_rules_cover_independent_and_composite_stories(self):
-        rules = collector.SOURCE_RULES
-        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", rules)
-        self.assertIn("Строка источника должна быть последней строкой сюжета", rules)
-        self.assertIn("покрывать все существенные утверждения", rules)
-        self.assertIn("иначе раздели материал на отдельные сюжеты или пункты", rules)
-        self.assertIn("ставь источник непосредственно после каждого события", rules)
-        self.assertIn("не собирай общий список ссылок в конце блока", rules)
-        self.assertIn("Пункты «Главное за период» могут не дублировать ссылки", rules)
-        self.assertIn("2–3 ключевые ссылки", rules)
-        self.assertEqual(rules.count("Каждый самостоятельный фактический сюжет"), 1)
-        self.assertEqual(rules.count("Строка источника должна быть последней строкой сюжета"), 1)
-        self.assertNotIn("не переходи к следующему заголовку или самостоятельному сюжету", rules)
-        self.assertNotIn("Источник ставь после соответствующего сюжета или пункта", rules)
-
-    def test_digest_isolated_from_user_profile_and_chat_history(self):
-        rules = collector.EDITORIAL_PRINCIPLES
-        self.assertIn("игнорируй сведения о пользователе", rules)
-        self.assertIn("персональную память", rules)
-        self.assertIn("историю текущего и прошлых чатов", rules)
-        self.assertIn("не должны влиять на отбор, порядок, акценты или оценку полезности материала", rules)
-        self.assertIn("Не пиши «для вас», «вам особенно важно»", rules)
-        self.assertEqual(rules.count("игнорируй сведения о пользователе"), 1)
-        self.assertEqual(rules.count("Не пиши «для вас»"), 1)
-
-    def test_editorial_rules_do_not_force_analysis_after_every_story(self):
-        rules = collector.EDITORIAL_PRINCIPLES
-        self.assertIn("если факты самодостаточны", rules)
-        self.assertIn("не дописывай обязательную аналитику", rules)
-        self.assertIn("не ранжируй событие", rules.lower())
-
-    def test_prompt_size_budget(self):
-        self.assertLess(len(collector.EDITORIAL_PRINCIPLES), 3500)
-        self.assertLess(len(collector.SOURCE_RULES), 1200)
-        self.assertLess(len(collector.DIGEST_REQUEST), 6000)
-
-    def test_digest_profile_version_is_an_independent_export_contract(self):
-        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 7)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "7.0")
-        source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
-        self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
-
-    def test_export_contract_keeps_external_handoff_neutral(self):
-        source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn('"recommended_digest_request"', source)
-        self.assertNotIn('"recommended_ai_request"', source)
-        self.assertIn('"content_use_notice"', source)
-        self.assertTrue(
-            hasattr(collector, "build_search_digest_instruction")
-        )
-        self.assertFalse(
-            hasattr(collector, "build_search_ai_instruction")
-        )
-        self.assertNotIn("ФАЙЛ ДЛЯ ИИ-АССИСТЕНТА", source)
-
-    def test_readme_documents_local_only_export_and_policy_review(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn(
-            "Программа сама не отправляет содержимое Telegram во внешние AI/ML-сервисы",
-            readme,
-        )
-        self.assertIn(
-            "Смысловой ML/embedding-поиск по Telegram-контенту",
-            readme,
-        )
-        self.assertIn(
-            "Sponsored Messages",
-            readme,
-        )
-        self.assertIn(
-            "Unofficial TelegramNewsAI",
-            readme,
-        )
-        self.assertNotIn("--setup-semantic", readme)
-
     def test_user_facing_source_documentation_matches_fallback_order(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("источник по возможности ведёт непосредственно на конкретную исходную публикацию", readme)
@@ -1160,6 +976,62 @@ class OfflineRegressionTests(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, source)
 
+    def test_export_contract_contains_no_embedded_ai_instructions(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
+        self.assertFalse(hasattr(collector, "DIGEST_REQUEST"))
+        self.assertFalse(hasattr(collector, "EDITORIAL_PRINCIPLES"))
+        self.assertFalse(hasattr(collector, "SOURCE_RULES"))
+        self.assertFalse(
+            hasattr(collector, "build_search_digest_instruction")
+        )
+        self.assertNotIn('"recommended_digest_request"', source)
+        self.assertNotIn('"recommended_ai_request"', source)
+        self.assertNotIn('"digest_profile_version"', source)
+        self.assertIn('"content_use_notice"', source)
+
+    def test_generated_period_export_uses_ai_neutral_contract(self):
+        channels = [{"id": 10, "name": "A", "username": "a"}]
+        sync_stats = {
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 0,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+        latest, archive, _, _ = collector._v4_save_output(
+            [], [], [], 0, 0, 6, channels, sync_stats, None, None, [], self.settings
+        )
+        payload = __import__("json").loads(
+            latest.read_text(encoding="utf-8")
+        )
+        self.assertEqual(payload["meta"]["schema_version"], 8)
+        self.assertEqual(
+            payload["meta"]["artifact_type"],
+            "telegram_period_export",
+        )
+        self.assertNotIn("recommended_digest_request", payload["meta"])
+        self.assertNotIn("recommended_ai_request", payload["meta"])
+        self.assertNotIn("digest_profile_version", payload["meta"])
+        self.assertIn("content_use_notice", payload["meta"])
+        self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
+
+    def test_readme_positions_product_as_local_non_ai_tool(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Unofficial Telegram News Digest", readme)
+        self.assertIn(
+            "не содержит встроенных инструкций для AI/ML",
+            readme,
+        )
+        self.assertIn("SQLite FTS5/LIKE", readme)
+        self.assertNotIn("ИИ-ассистент", readme)
+        self.assertNotIn("ChatGPT", readme)
+
     def test_installer_requires_supported_python(self):
         installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
         self.assertIn("$minimumPython = [Version]'3.10'", installer)
@@ -1169,13 +1041,13 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_user_facing_branding_is_unofficial(self):
         self.assertEqual(
             collector.APP_DISPLAY_NAME,
-            "Unofficial TelegramNewsAI",
+            "Unofficial Telegram News Digest",
         )
         launcher = (
             ROOT / "launcher" / "Telegram_Digest.cs"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'AssemblyTitle("Unofficial TelegramNewsAI")',
+            'AssemblyTitle("Unofficial Telegram News Digest")',
             launcher,
         )
         build_launcher = (
@@ -1187,7 +1059,7 @@ class OfflineRegressionTests(unittest.TestCase):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
         for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'"):
             self.assertIn(required, builder)
-        self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)
+        self.assertIn("Unofficial-Telegram-News-Digest-$version-$channel-Windows", builder)
         self.assertIn("launcher\\build_launcher.ps1", builder)
         self.assertNotIn("'.gitignore'", builder)
 
@@ -1229,57 +1101,6 @@ class OfflineRegressionTests(unittest.TestCase):
                 )
                 self.assertNotIn("topic", message)
                 self.assertNotIn("category", message)
-
-    def test_topic_search_request_uses_human_sources(self):
-        request = collector.build_search_digest_instruction(
-            "проверочная тема",
-            7,
-            {},
-        )
-        self.assertIn("telegram_url", request)
-        self.assertIn("channel_url", request)
-        self.assertIn("иначе используй channel_url", request)
-        self.assertIn("URL не придумывай", request)
-        self.assertIn("related_message_groups", request)
-        self.assertIn("по этой теме, а не по всей повестке", request)
-        self.assertIn("редакционный вывод", request)
-        self.assertNotIn("Открыть публикацию", request)
-        self.assertNotIn("file citations", request.lower())
-        self.assertNotIn("source chips", request.lower())
-        self.assertLess(len(request), 5500)
-
-    def test_editorial_requests_do_not_depend_on_chatgpt_ui(self):
-        requests = collector.DIGEST_REQUEST + collector.build_search_digest_instruction(
-            "проверочная тема", 7, {}
-        )
-        self.assertNotIn("ChatGPT", requests)
-        self.assertNotIn("file citations", requests.lower())
-        self.assertNotIn("source chips", requests.lower())
-
-    def test_generated_digest_json_is_portable_and_uses_new_contract(self):
-        channels = [{"id": 10, "name": "A", "username": "a"}]
-        sync_stats = {
-            "new_messages_saved": 0,
-            "content_changed_messages_refreshed": 0,
-            "metrics_changed_messages_refreshed": 0,
-            "migrated_messages": 0,
-            "telegram_messages_scanned": 0,
-            "failed_channels": 0,
-            "successful_channels": 1,
-            "channel_results": [],
-            "history_completeness": {"complete": True},
-            "self_diagnostics": {},
-        }
-        latest, archive, _, _ = collector._v4_save_output(
-            [], [], [], 0, 0, 6, channels, sync_stats, None, None, [], self.settings
-        )
-        payload = __import__("json").loads(latest.read_text(encoding="utf-8"))
-        self.assertEqual(payload["meta"]["schema_version"], 7)
-        self.assertEqual(payload["meta"]["digest_profile_version"], "7.0")
-        self.assertIn("recommended_digest_request", payload["meta"])
-        self.assertNotIn("recommended_ai_request", payload["meta"])
-        self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
-
 
 class MenuCancellationRegressionTests(unittest.TestCase):
     def test_back_command_aliases(self):
