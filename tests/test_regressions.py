@@ -598,6 +598,33 @@ class OfflineRegressionTests(unittest.TestCase):
             collector.CRED_FILE = original_cred
             collector.SESSION_FILE = original_session
 
+    def test_existing_bad_credentials_are_not_deleted_or_reprompted(self):
+        original_cred = collector.CRED_FILE
+        try:
+            collector.CRED_FILE = self.directory / "credentials.bin"
+            collector.CRED_FILE.write_bytes(b"existing-protected-data")
+
+            with patch.object(
+                collector,
+                "dpapi_decrypt",
+                side_effect=ValueError("cannot decrypt"),
+            ):
+                with patch("builtins.input") as mocked_input:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Автоматическая замена",
+                    ):
+                        collector.load_or_create_credentials()
+
+            mocked_input.assert_not_called()
+            self.assertTrue(collector.CRED_FILE.exists())
+            self.assertEqual(
+                collector.CRED_FILE.read_bytes(),
+                b"existing-protected-data",
+            )
+        finally:
+            collector.CRED_FILE = original_cred
+
     def test_ml_semantic_processing_is_disabled(self):
         self.assertFalse(
             collector.DEFAULT_SETTINGS["semantic_enabled"]
