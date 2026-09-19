@@ -6,7 +6,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -524,8 +524,11 @@ class OfflineRegressionTests(unittest.TestCase):
             }
         ]
         input_entity = SimpleNamespace(channel_id=10)
+        session = SimpleNamespace(
+            get_input_entity=Mock(return_value=input_entity),
+        )
         client = SimpleNamespace(
-            get_input_entity=AsyncMock(return_value=input_entity),
+            session=session,
             get_dialogs=AsyncMock(),
         )
 
@@ -544,7 +547,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], 10)
         self.assertIs(result[0]["entity"], input_entity)
-        client.get_input_entity.assert_awaited_once()
+        session.get_input_entity.assert_called_once()
         client.get_dialogs.assert_not_awaited()
 
     def test_restriction_like_errors_require_safety_stop(self):
