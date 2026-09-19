@@ -1089,7 +1089,7 @@ class OfflineRegressionTests(unittest.TestCase):
             hasattr(collector, "build_search_digest_instruction")
         )
         self.assertFalse(
-            hasattr(collector, "build_search_digest_instruction")
+            hasattr(collector, "build_search_ai_instruction")
         )
         self.assertNotIn("ФАЙЛ ДЛЯ ИИ-АССИСТЕНТА", source)
 
