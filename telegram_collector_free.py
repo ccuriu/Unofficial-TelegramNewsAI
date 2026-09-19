@@ -144,7 +144,7 @@ DEFAULT_SETTINGS = {
 
     "channel_retry_attempts": 3,
     "retry_delay_seconds": 3,
-    "max_flood_wait_seconds": 90,
+    "max_flood_wait_seconds": 60,
     # Фиксируем поведение Telethon явно: ожидания до этого порога
     # библиотека пережидает сама, более длинные попадают в наш retry-код.
     "telethon_flood_sleep_threshold_seconds": 60,
