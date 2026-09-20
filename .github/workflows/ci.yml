@@ -84,6 +84,50 @@ jobs:
         run: |
           .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
 
+      - name: Verify clean install from release candidate
+        shell: powershell
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\release" -Directory)
+          if ($packages.Count -ne 1) { throw "Expected exactly one release package directory, found $($packages.Count)." }
+          $package = $packages[0].FullName
+          $installer = Join-Path $package 'install.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -NoShortcut
+          if ($LASTEXITCODE -ne 0) { throw "Clean install failed: $LASTEXITCODE" }
+
+          $venvPython = Join-Path $package '.venv\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            throw 'Clean install did not create .venv.'
+          }
+          & $venvPython -c "import telethon; print('Installed Telethon', telethon.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Telethon import failed.' }
+          & $venvPython -m py_compile (Join-Path $package 'telegram_collector_free.py')
+          if ($LASTEXITCODE -ne 0) { throw 'Installed collector compile-check failed.' }
+
+          $launcher = Join-Path $package 'Telegram_Digest.exe'
+          $process = Start-Process $launcher -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed launcher self-test failed: $($process.ExitCode)" }
+
+          $version = (Select-String -LiteralPath (Join-Path $package 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($version -ne '5.4.17 Testing') { throw "Unexpected installed collector version: $version" }
+          $versionInfo = (Get-Item -LiteralPath $launcher).VersionInfo
+          if ($versionInfo.FileVersion -ne '5.4.17.0') { throw "Unexpected launcher file version: $($versionInfo.FileVersion)" }
+          if ($versionInfo.FileDescription -notlike '*5.4.17 Testing*') { throw "Unexpected launcher description: $($versionInfo.FileDescription)" }
+
+          foreach ($relative in @(
+            'credentials.bin',
+            'telegram_session.session',
+            'selected_channels.json',
+            'settings_free.json',
+            'news.db',
+            'Дайджесты',
+            'logs',
+            'Резервные_копии'
+          )) {
+            if (Test-Path -LiteralPath (Join-Path $package $relative)) {
+              throw "Fresh installation unexpectedly contains user state: $relative"
+            }
+          }
+
       - name: Verify exact release ZIP contents
         shell: powershell
         run: |
