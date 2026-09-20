@@ -1856,7 +1856,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Текущая версия — 5.4.14 Testing",
+            "Текущая версия — 5.4.15 Testing",
             readme,
         )
         self.assertIn(
@@ -1875,12 +1875,17 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertNotIn("Если потеря доступа к конкретному аккаунту", readme)
 
     def test_release_builder_uses_exact_maintenance_distribution(self):
-        builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
-        for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'"):
-            self.assertIn(required, builder)
+        builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
+        manifest = __import__("json").loads(
+            (ROOT / "release_manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("ConvertFrom-Json", builder)
+        self.assertIn("release_manifest.json", builder)
+        for required in ("LICENSE", "SECURITY.md", "Telegram_Digest.exe.sha256", "UPDATE.bat", "update.ps1"):
+            self.assertIn(required, manifest["ProgramFiles"])
         self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)
         self.assertIn("launcher\\build_launcher.ps1", builder)
-        self.assertNotIn("'.gitignore'", builder)
+        self.assertNotIn(".gitignore", manifest["ProgramFiles"])
 
     def test_ci_verifies_and_uploads_the_release_artifact(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
