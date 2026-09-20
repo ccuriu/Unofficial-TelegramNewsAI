@@ -43,7 +43,7 @@ APP_VERSION = "5.4.14 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
-# Схема 8 компактно кодирует redundant raw_text и отделяет изменения
+# Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
 DIGEST_PROFILE_VERSION = "8.0"
@@ -7076,6 +7076,11 @@ def open_db():
 
 def stored_semantic_message(row):
     data = dict(row)
+    external_urls = json_loads(data.get("external_urls_json"), [])
+    canonical_urls = json_loads(data.get("canonical_urls_json"), [])
+    if not canonical_urls:
+        canonical_urls = normalize_external_urls(external_urls)
+
     return {
         "text": data.get("text"),
         "media": json_loads(data.get("media_json"), {}),
@@ -7083,7 +7088,7 @@ def stored_semantic_message(row):
         "reply_to_message_id": data.get("reply_to_message_id"),
         "post_author": data.get("post_author"),
         "forwarded_from": json_loads(data.get("forwarded_from_json"), None),
-        "canonical_urls": json_loads(data.get("canonical_urls_json"), []),
+        "canonical_urls": canonical_urls,
     }
 
 
@@ -7163,6 +7168,8 @@ def normalize_previous_version(snapshot, captured_utc):
         result["external_urls"] = external_urls
 
     canonical_urls = json_loads(snapshot.get("canonical_urls_json"), [])
+    if not canonical_urls and external_urls:
+        canonical_urls = normalize_external_urls(external_urls)
     if canonical_urls:
         result["canonical_urls"] = canonical_urls
 
@@ -7289,7 +7296,7 @@ def collapse_duplicates(messages, settings):
         if isinstance(media, dict) and media.get('type') and not media_identity:
             media_guard = message_key(m)
         fingerprint=json_dumps([text,media,m.get('canonical_urls'),m.get('raw_text'),
-                               m.get('availability'),m.get('change_status'),media_guard])
+                               media_guard])
         target=None
         for candidate in reversed(buckets.get(fingerprint,[])):
             a,b=parse_dt(m.get('date_utc')),parse_dt(candidate.get('date_utc'))
