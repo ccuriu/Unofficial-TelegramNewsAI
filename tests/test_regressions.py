@@ -1499,6 +1499,69 @@ class OfflineRegressionTests(unittest.TestCase):
         post_url = "https://max.ru/channel_vmax/AZ9FDVpHASw"
         self.assertTrue(collector.is_specific_shared_source_url(post_url))
 
+    def test_continuity_loader_uses_matching_prior_digest_only(self):
+        collector.ensure_dirs()
+        channels = [{"id": 1, "name": "Test", "username": "test"}]
+        fingerprint = collector.selection_fingerprint(channels)
+        reference = collector.utc_now()
+        period_start = reference - timedelta(hours=24)
+
+        prior = {
+            "channel_id": 1,
+            "channel": "Test",
+            "username": "test",
+            "message_id": 10,
+            "date_utc": collector.iso_utc(period_start - timedelta(hours=6)),
+            "text": "Предыстория нужного сюжета",
+        }
+        current_period = {
+            "channel_id": 1,
+            "channel": "Test",
+            "username": "test",
+            "message_id": 20,
+            "date_utc": collector.iso_utc(period_start + timedelta(hours=1)),
+            "text": "Сообщение уже текущего периода",
+        }
+
+        good_payload = {
+            "meta": {
+                "artifact_type": "telegram_news_digest",
+                "created_utc": collector.iso_utc(reference - timedelta(hours=1)),
+                "selection_fingerprint": fingerprint,
+            },
+            "news_messages": [prior, current_period],
+        }
+        wrong_payload = {
+            "meta": {
+                "artifact_type": "telegram_news_digest",
+                "created_utc": collector.iso_utc(reference - timedelta(hours=2)),
+                "selection_fingerprint": "wrong-fingerprint",
+            },
+            "news_messages": [{
+                **prior,
+                "message_id": 30,
+                "text": "Чужой набор каналов",
+            }],
+        }
+
+        collector.LATEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        collector.LATEST_FILE.write_text(
+            __import__("json").dumps(good_payload),
+            encoding="utf-8",
+        )
+        (collector.ARCHIVE_DIR / "ДАЙДЖЕСТ_wrong.json").write_text(
+            __import__("json").dumps(wrong_payload),
+            encoding="utf-8",
+        )
+
+        loaded = collector.load_recent_continuity_messages(
+            channels,
+            period_start,
+            reference_utc=reference,
+        )
+
+        self.assertEqual([item["message_id"] for item in loaded], [10])
+
     def test_continuity_lexical_followup_uses_bounded_prior_context(self):
         prior = {
             "channel_id": 1,
