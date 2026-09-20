@@ -78,7 +78,7 @@ class UpdaterContractTests(unittest.TestCase):
             "Unofficial TelegramNewsAI.lnk",
             "AllowDowngrade",
             "Get-StateSnapshot",
-            "Get-FileHash",
+            "Get-Sha256",
             "ConvertFrom-Json",
             "install.ps1",
             "--self-test",

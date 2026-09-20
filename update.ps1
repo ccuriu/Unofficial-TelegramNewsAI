@@ -192,6 +192,23 @@ function Assert-ProgramManifest($Manifest) {
     }
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha.ComputeHash($stream)
+            return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '').ToUpperInvariant()
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Assert-LauncherChecksum {
     $launcher = Join-Path $sourceDir 'Telegram_Digest.exe'
     $checksum = Join-Path $sourceDir 'Telegram_Digest.exe.sha256'
@@ -203,7 +220,7 @@ function Assert-LauncherChecksum {
     }
 
     $expected = ((Get-Content -LiteralPath $checksum -Raw).Trim() -split '\s+')[0]
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $launcher).Hash
+    $actual = Get-Sha256 $launcher
     if (-not $expected -or $actual -ine $expected) {
         throw 'Контрольная сумма Telegram_Digest.exe в новом release не совпадает.'
     }
@@ -266,7 +283,7 @@ function Get-StateSnapshot([string]$Target) {
     foreach ($file in $files) {
         $snapshot[$file.Name] = @{
             Length = [int64]$file.Length
-            Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash
+            Sha256 = Get-Sha256 $file.FullName
         }
     }
     return $snapshot

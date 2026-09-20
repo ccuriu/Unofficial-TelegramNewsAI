@@ -1876,14 +1876,16 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_release_builder_uses_exact_maintenance_distribution(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
-        manifest = (ROOT / "release_manifest.json").read_text(encoding="utf-8-sig")
+        manifest = __import__("json").loads(
+            (ROOT / "release_manifest.json").read_text(encoding="utf-8")
+        )
         self.assertIn("ConvertFrom-Json", builder)
         self.assertIn("release_manifest.json", builder)
-        for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'", "'UPDATE.bat'", "'update.ps1'"):
-            self.assertIn(required, manifest)
+        for required in ("LICENSE", "SECURITY.md", "Telegram_Digest.exe.sha256", "UPDATE.bat", "update.ps1"):
+            self.assertIn(required, manifest["ProgramFiles"])
         self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)
         self.assertIn("launcher\\build_launcher.ps1", builder)
-        self.assertNotIn("'.gitignore'", manifest)
+        self.assertNotIn(".gitignore", manifest["ProgramFiles"])
 
     def test_ci_verifies_and_uploads_the_release_artifact(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
