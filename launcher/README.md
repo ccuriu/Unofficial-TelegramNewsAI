@@ -12,7 +12,7 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\launcher\build_launcher.ps1
 ```
 
-Сценарий использует штатный компилятор `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`, исходник `Telegram_Digest.cs` и оригинальный проектный значок `assets/icon.png`. `build_icon.ps1` автоматически собирает из PNG многоразмерный Windows ICO (16–256 px), после чего `build_launcher.ps1` встраивает его в EXE через `/win32icon`. Значок не копирует официальный логотип Telegram. Результат записывается в `Telegram_Digest.exe`.
+Сценарий использует штатный компилятор `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` и исходник `Telegram_Digest.cs`. `build_icon.ps1` программно рисует упрощённый проектный значок и собирает многоразмерный Windows ICO (16–256 px), оптимизированный для маленьких размеров Проводника и ярлыков. `build_launcher.ps1` встраивает ICO в EXE через `/win32icon`. Для README используется согласованная векторная версия `assets/icon.svg`. Значок оригинальный и не копирует официальный логотип Telegram.
 
 После сборки обновите `Telegram_Digest.exe.sha256` и выполните:
 
