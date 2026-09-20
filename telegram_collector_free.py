@@ -4750,7 +4750,7 @@ def build_continuity_context(
             token_docs.setdefault(token, set()).add(key)
 
     document_count = max(1, len(prior_by_key))
-    rare_limit = max(2, int(math.ceil(document_count * 0.03)))
+    rare_limit = max(3, int(math.ceil(document_count * 0.03)))
     common_limit = max(8, int(math.ceil(document_count * 0.12)))
 
     linked = {}
@@ -5025,9 +5025,9 @@ SOURCE_RULES = (
 DIGEST_REQUEST = (
     "Подготовь итоговый редакторский дайджест за выбранный период. У точных повторов inherited_fields восстанавливай из "
     "родительской публикации по inherits_from_message_key. Основной дайджест всегда строй по всему содержательному материалу "
-    "news_messages и operational_messages выбранного периода. continuity_context — только предыстория вне периода для текущих "
-    "сообщений; используй её лишь при содержательной связи. lexical_candidate не является доказательством. Старый context_message "
-    "не выдавай за событие текущего периода и не повторяй без сегодняшнего развития. changes_since_previous_digest — только дополнительный слой сравнения: "
+    "news_messages и operational_messages выбранного периода. continuity_context — предыстория вне периода; используй только при "
+    "явной связи. lexical_candidate не доказательство; context_message не выдавай за текущую новость. changes_since_previous_digest — "
+    "только дополнительный слой сравнения: "
     "он не задаёт временные границы основного дайджеста, не заменяет его и не является фильтром отбора. "
     "changes_since_previous_digest.outside_period_changes содержит публикации вне выбранного периода, которые после предыдущего "
     "выпуска были впервые обнаружены, содержательно изменились или стали недоступны; учитывай их только для развития сюжета или "
