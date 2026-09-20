@@ -106,11 +106,15 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         self.assertEqual(
             collector.inter_channel_delay_seconds(self.settings, 50),
-            0.75,
+            0.25,
         )
         self.assertEqual(
             collector.inter_channel_delay_seconds(self.settings, 51),
-            1.5,
+            0.25,
+        )
+        self.assertEqual(
+            collector.inter_channel_delay_seconds(self.settings, 101),
+            0.5,
         )
         self.assertEqual(
             collector.DEFAULT_SETTINGS["telethon_flood_sleep_threshold_seconds"],
@@ -806,6 +810,100 @@ class OfflineRegressionTests(unittest.TestCase):
             collector.CRED_FILE = original_cred
             collector.SESSION_FILE = original_session
 
+    def test_explicit_reauthorization_can_start_new_session(self):
+        original_cred = collector.CRED_FILE
+        original_session = collector.SESSION_FILE
+        try:
+            collector.CRED_FILE = self.directory / "credentials.bin"
+            collector.CRED_FILE.write_bytes(b"existing")
+            collector.SESSION_FILE = str(
+                self.directory / "telegram_session"
+            )
+
+            candidate = SimpleNamespace(
+                connect=AsyncMock(),
+                is_user_authorized=AsyncMock(return_value=False),
+                disconnect=AsyncMock(),
+                start=AsyncMock(),
+            )
+
+            with patch.object(
+                collector,
+                "TelegramClient",
+                return_value=candidate,
+            ):
+                with patch.object(collector, "save_credentials"):
+                    result_client, _ = asyncio.run(
+                        collector.ensure_telegram_client(
+                            None,
+                            {
+                                "api_id": 1,
+                                "api_hash": "a" * 32,
+                                "phone": "+10000000000",
+                            },
+                            self.settings,
+                            allow_reauthorization=True,
+                        )
+                    )
+
+            self.assertIs(result_client, candidate)
+            candidate.start.assert_awaited_once()
+        finally:
+            collector.CRED_FILE = original_cred
+            collector.SESSION_FILE = original_session
+
+    def test_recreate_session_requires_confirmation_and_preserves_user_data(self):
+        original_cred = collector.CRED_FILE
+        original_session = collector.SESSION_FILE
+        try:
+            collector.CRED_FILE = self.directory / "credentials.bin"
+            collector.CRED_FILE.write_bytes(b"existing-credentials")
+            collector.SESSION_FILE = str(
+                self.directory / "telegram_session"
+            )
+            session_file = Path(collector.SESSION_FILE + ".session")
+            journal_file = Path(collector.SESSION_FILE + ".session-journal")
+            session_file.write_bytes(b"session")
+            journal_file.write_bytes(b"journal")
+
+            client = SimpleNamespace(disconnect=AsyncMock())
+            next_client = object()
+            creds = {
+                "api_id": 1,
+                "api_hash": "a" * 32,
+                "phone": "+10000000000",
+            }
+
+            with patch("builtins.input", return_value="1"):
+                with patch.object(
+                    collector,
+                    "ensure_telegram_client",
+                    AsyncMock(return_value=(next_client, creds)),
+                ) as mocked_ensure:
+                    result_client, result_creds = asyncio.run(
+                        collector.recreate_telegram_session(
+                            client,
+                            creds,
+                            self.settings,
+                        )
+                    )
+
+            self.assertIs(result_client, next_client)
+            self.assertEqual(result_creds, creds)
+            self.assertFalse(session_file.exists())
+            self.assertFalse(journal_file.exists())
+            self.assertEqual(
+                collector.CRED_FILE.read_bytes(),
+                b"existing-credentials",
+            )
+            client.disconnect.assert_awaited_once()
+            self.assertTrue(
+                mocked_ensure.await_args.kwargs["allow_reauthorization"]
+            )
+        finally:
+            collector.CRED_FILE = original_cred
+            collector.SESSION_FILE = original_session
+
     def test_existing_bad_credentials_are_not_deleted_or_reprompted(self):
         original_cred = collector.CRED_FILE
         try:
@@ -1315,11 +1413,14 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
 
-    def test_export_contract_keeps_external_handoff_neutral(self):
+    def test_export_contract_keeps_user_controlled_ai_handoff(self):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"recommended_digest_request"', source)
         self.assertNotIn('"recommended_ai_request"', source)
         self.assertIn('"content_use_notice"', source)
+        self.assertIn('"usage_hint"', source)
+        self.assertIn("например ChatGPT", source)
+        self.assertIn("не отправляет", source)
         self.assertTrue(
             hasattr(collector, "build_search_digest_instruction")
         )
@@ -1344,6 +1445,14 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         self.assertIn(
             "Unofficial TelegramNewsAI",
+            readme,
+        )
+        self.assertIn(
+            "структурированный JSON → выбранный пользователем ИИ → дайджест событий",
+            readme,
+        )
+        self.assertIn(
+            "T` — явно пересоздать Telegram-сессию",
             readme,
         )
         self.assertNotIn("--setup-semantic", readme)
