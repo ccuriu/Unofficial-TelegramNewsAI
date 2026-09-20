@@ -1371,7 +1371,45 @@ class OfflineRegressionTests(unittest.TestCase):
             "raw_text_available": True,
         })
         self.assertNotIn("raw_text", same)
-        self.assertTrue(same["raw_text_available"])
+        self.assertNotIn("raw_text_available", same)
+
+        compact_defaults = collector.prepare_message_for_ai({
+            "channel_id": 1,
+            "message_id": 10,
+            "text": "Проверка пустых значений",
+            "reactions": [],
+            "external_urls": [],
+            "canonical_urls": [],
+            "duplicates": [],
+            "media": {
+                "type": None,
+                "mime_type": None,
+                "file_name": None,
+                "identity": None,
+            },
+            "versions_count": 0,
+            "versions_truncated": False,
+            "previous_versions": [],
+            "availability": "available",
+            "availability_checked_utc": collector.iso_utc(self.now),
+            "unavailable_since_utc": None,
+            "in_selected_period": True,
+        })
+        for field in (
+            "reactions",
+            "external_urls",
+            "canonical_urls",
+            "duplicates",
+            "media",
+            "versions_count",
+            "versions_truncated",
+            "previous_versions",
+            "availability",
+            "availability_checked_utc",
+            "unavailable_since_utc",
+            "in_selected_period",
+        ):
+            self.assertNotIn(field, compact_defaults)
 
         different = collector.prepare_message_for_ai({
             "channel_id": 1,
