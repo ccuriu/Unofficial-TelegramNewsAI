@@ -1028,6 +1028,37 @@ class OfflineRegressionTests(unittest.TestCase):
         results = self.search("мобилизация")["direct_results"]
         self.assertEqual([item["message_id"] for item in results], [1])
 
+    def test_nova_poshta_aliases_keep_singular_brand_forms_without_plural_noise(self):
+        positives = {
+            1: "Новая почта открыла новое отделение",
+            2: "В Новой почте сообщили о новом графике",
+            3: "Решение Новой почты вступило в силу",
+            4: "Новую почту временно закрыли",
+            5: "Нова пошта відкрила нове відділення",
+            6: "У Нової пошти змінився графік",
+            7: "У Новій пошті повідомили про зміни",
+            8: "Нову пошту відкрили у громаді",
+            9: "Новою поштою відправили посилку",
+            10: "Nova Poshta announced a new service",
+        }
+        negatives = {
+            11: "У районі з'явилися нові пошти для різних сервісів",
+            12: "З'явилися новые почты для тестовых аккаунтов",
+            13: "Серед нових сервісів окремо згадали обмін файлами, а повідомлення надсилали електронною поштою",
+        }
+        for message_id, text in {**positives, **negatives}.items():
+            self.add_message(message_id, text)
+
+        results = self.search("Новая почта")["direct_results"]
+        found_ids = {item["message_id"] for item in results}
+
+        self.assertEqual(found_ids, set(positives))
+        adjective_variants = collector.term_variants("новая", self.settings)
+        for plural in ("новые", "новых", "нові", "нових"):
+            self.assertNotIn(plural, adjective_variants)
+        for singular in ("новая", "новой", "новую", "нова", "нової", "новій", "нову", "новою", "nova"):
+            self.assertIn(singular, adjective_variants)
+
     def test_quoted_phrase_search(self):
         self.add_message(1, "Начались мирные переговоры сторон")
         self.add_message(2, "Переговоры продолжились, но мирные инициативы отложены")
@@ -1961,7 +1992,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Текущая версия — 5.4.16 Testing",
+            "Текущая версия — 5.4.17 Testing",
             readme,
         )
         self.assertIn(
@@ -2049,6 +2080,37 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertNotIn("source chips", request.lower())
         self.assertLess(len(request), 5500)
 
+    def test_topic_search_json_exports_digest_profile_version(self):
+        self.add_message(1, "Нова пошта відкрила нове відділення")
+        result = self.search("Новая почта")
+        collector.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        collector.SEARCH_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+        latest, _, payload = collector._v4_save_search_output(
+            self.connection,
+            "Новая почта",
+            1,
+            self.settings,
+            {"quick_check_ok": True, "quick_check_result": "ok"},
+            channels=[self.channel],
+            history_status={"complete": True},
+            search_result=result,
+        )
+        written = __import__("json").loads(latest.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            payload["meta"]["digest_profile_version"],
+            collector.DIGEST_PROFILE_VERSION,
+        )
+        self.assertEqual(
+            written["meta"]["digest_profile_version"],
+            collector.DIGEST_PROFILE_VERSION,
+        )
+        self.assertEqual(
+            written["meta"]["schema_version"],
+            collector.EXPORT_SCHEMA_VERSION,
+        )
+
     def test_editorial_requests_do_not_depend_on_chatgpt_ui(self):
         requests = collector.DIGEST_REQUEST + collector.build_search_digest_instruction(
             "проверочная тема", 7, {}
@@ -2076,7 +2138,10 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         payload = __import__("json").loads(latest.read_text(encoding="utf-8"))
         self.assertEqual(payload["meta"]["schema_version"], 8)
-        self.assertEqual(payload["meta"]["digest_profile_version"], "8.0")
+        self.assertEqual(
+            payload["meta"]["digest_profile_version"],
+            collector.DIGEST_PROFILE_VERSION,
+        )
         self.assertIn("raw_text_representation", payload["meta"])
         self.assertIn("recommended_digest_request", payload["meta"])
         self.assertNotIn("recommended_ai_request", payload["meta"])
