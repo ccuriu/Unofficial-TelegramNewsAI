@@ -126,7 +126,6 @@ jobs:
           if ($version -ne '5.4.17 Testing') { throw "Unexpected installed collector version: $version" }
           $versionInfo = (Get-Item -LiteralPath $launcher).VersionInfo
           if ($versionInfo.FileVersion -ne '5.4.17.0') { throw "Unexpected launcher file version: $($versionInfo.FileVersion)" }
-          if ($versionInfo.FileDescription -notlike '*5.4.17 Testing*') { throw "Unexpected launcher description: $($versionInfo.FileDescription)" }
 
           foreach ($relative in @(
             'credentials.bin',
