@@ -158,7 +158,7 @@ jobs:
 
           $collector = Join-Path $target 'telegram_collector_free.py'
           $collectorText = Get-Content -LiteralPath $collector -Raw -Encoding UTF8
-          $collectorText = $collectorText -replace 'APP_VERSION\s*=\s*"5\.4\.17 Testing"', 'APP_VERSION = "5.4.16 Testing"'
+          $collectorText = $collectorText -replace 'APP_VERSION\s*=\s*"5\.5\.0 Testing"', 'APP_VERSION = "5.4.17 Testing"'
           [IO.File]::WriteAllText($collector, $collectorText, [Text.UTF8Encoding]::new($false))
 
           $state = @{
