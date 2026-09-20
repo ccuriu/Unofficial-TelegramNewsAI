@@ -1,5 +1,9 @@
 # Unofficial TelegramNewsAI
 
+<p align="center">
+  <img src="assets/icon.png" alt="Unofficial TelegramNewsAI" width="180">
+</p>
+
 > [!CAUTION]
 > **Текущий приоритет проекта — личное использование и стабильность. Репозиторий остаётся приватным.**
 >
