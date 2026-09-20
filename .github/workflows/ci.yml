@@ -140,7 +140,7 @@ jobs:
             }
           }
           $unexpectedDirs = @(Get-ChildItem -LiteralPath $package -Directory -Force |
-            Where-Object { $_.Name -ne '.venv' })
+            Where-Object { $_.Name -notin @('.venv', '__pycache__') })
           if ($unexpectedDirs.Count) {
             throw "Fresh installation created unexpected local directories: $($unexpectedDirs.Name -join ', ')"
           }
