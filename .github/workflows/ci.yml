@@ -90,9 +90,10 @@ jobs:
           $packages = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\release" -Directory)
           if ($packages.Count -ne 1) { throw "Expected exactly one release package directory, found $($packages.Count)." }
           $package = $packages[0].FullName
-          $installer = Join-Path $package 'install.ps1'
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
-          if ($LASTEXITCODE -ne 0) { throw "Clean install failed: $LASTEXITCODE" }
+          $installerBat = Join-Path $package 'INSTALL.bat'
+          $command = 'echo.|call "' + $installerBat + '"'
+          & cmd.exe /d /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Clean install through INSTALL.bat failed: $LASTEXITCODE" }
 
           $desktop = [Environment]::GetFolderPath('Desktop')
           $shortcutPath = Join-Path $desktop 'Unofficial TelegramNewsAI.lnk'
