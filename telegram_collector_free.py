@@ -39,13 +39,14 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.13 Testing"
+APP_VERSION = "5.4.14 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
-# Меняются только при несовместимом изменении контракта или инструкций.
-EXPORT_SCHEMA_VERSION = 7
-DIGEST_PROFILE_VERSION = "7.0"
+# Схема 8 компактно кодирует redundant raw_text и отделяет изменения
+# старых публикаций от основного временного окна дайджеста.
+EXPORT_SCHEMA_VERSION = 8
+DIGEST_PROFILE_VERSION = "8.0"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -1500,6 +1501,28 @@ def public_link(username, message_id):
     return None
 
 
+def enrich_forward_info_links(info):
+    """Добавляет проверяемые ссылки только для публичного источника пересылки."""
+    if not isinstance(info, dict):
+        return info
+
+    result = dict(info)
+    username = result.get("chat_username")
+    if not username:
+        return result
+
+    channel_url = public_channel_link(username)
+    if channel_url:
+        result["channel_url"] = channel_url
+
+    channel_post = result.get("channel_post")
+    telegram_url = public_link(username, channel_post)
+    if telegram_url:
+        result["telegram_url"] = telegram_url
+
+    return result
+
+
 def reaction_to_label(reaction):
     if reaction is None:
         return None
@@ -1740,11 +1763,12 @@ def extract_forward_info(msg):
     except Exception:
         pass
 
-    return {
+    cleaned = {
         k: v
         for k, v in result.items()
         if v is not None
-    } or None
+    }
+    return enrich_forward_info_links(cleaned) or None
 
 
 def extract_external_urls(msg):
@@ -1938,6 +1962,36 @@ def normalize_external_urls(urls):
     )
 
 
+def is_specific_shared_source_url(url):
+    """
+    Общая ссылка полезна как признак общего источника только когда она ведёт
+    на конкретный материал. Главная страница сайта или корень Telegram-канала
+    слишком слабы и могут ошибочно связать разные события.
+    """
+    if not isinstance(url, str):
+        return False
+
+    value = url.strip()
+    if not value or value.lower().startswith("mailto:"):
+        return False
+
+    try:
+        parts = urlsplit(value)
+    except Exception:
+        return False
+
+    host = (parts.hostname or "").lower()
+    if not host:
+        return False
+
+    path = (parts.path or "").strip("/")
+    if host in {"t.me", "telegram.me"}:
+        segments = [segment for segment in path.split("/") if segment]
+        return len(segments) >= 2 and segments[-1].isdigit()
+
+    return bool(path or parts.query)
+
+
 def make_origin_key(forwarded_from, canonical_urls):
     if forwarded_from:
         from_id = forwarded_from.get("from_id")
@@ -1955,8 +2009,9 @@ def make_origin_key(forwarded_from, canonical_urls):
                 f"{channel_post}"
             )
 
-    if canonical_urls:
-        return "url:" + canonical_urls[0]
+    for url in canonical_urls or []:
+        if is_specific_shared_source_url(url):
+            return "url:" + url
 
     return None
 
@@ -3038,9 +3093,11 @@ def _v4_db_row_to_message(row, previous_run_utc):
             "post_author"
         ],
 
-        "forwarded_from": json_loads(
-            row["forwarded_from_json"],
-            None,
+        "forwarded_from": enrich_forward_info_links(
+            json_loads(
+                row["forwarded_from_json"],
+                None,
+            )
         ),
         "external_urls": json_loads(
             row["external_urls_json"],
@@ -4316,9 +4373,10 @@ def build_related_groups(messages):
             "canonical_urls",
             [],
         ):
-            relation_keys.append(
-                "url:" + url
-            )
+            if is_specific_shared_source_url(url):
+                relation_keys.append(
+                    "url:" + url
+                )
 
         for relation_key in relation_keys:
             previous_key = buckets.get(
@@ -4454,9 +4512,14 @@ EDITORIAL_PRINCIPLES = (
     "уточнения, не пересказывай сообщения по очереди. Различай прямое сообщение, независимое подтверждение, официальное "
     "заявление, пересказ названного первоисточника, инсайд, версию и собственный редакционный вывод. Если канал ссылается на "
     "Reuters, BBC, ведомство, конкретного человека или другой названный первоисточник, укажи это естественно. Не превращай "
-    "утверждение в факт из-за статуса источника; важный одиночный инсайд можно включить с ясной атрибуцией. Расходящиеся версии "
-    "сопоставляй без самовольного выбора победителя, а перепечатки одного исходного сообщения не считай независимыми "
-    "подтверждениями. Не достраивай отсутствующие факты, включая автора действия, мотив, цель и причинность. Контекст или вывод "
+    "утверждение в факт из-за статуса источника; важный одиночный инсайд можно включить с ясной атрибуцией. Количество публикаций "
+    "само по себе не делает сюжет важнее и не повышает достоверность. Степень уверенности выражай естественно как «подтверждено», "
+    "«вероятно», «пока не подтверждено», «спорно» или «мнение/оценка», когда это помогает читателю; не ставь формальную метку "
+    "каждому пункту. Расходящиеся версии сопоставляй по совпадающим и спорным деталям; указывай, какая лучше подкреплена независимыми "
+    "данными, только если это действительно следует из материала, иначе оставляй расхождение открытым. Перепечатки одного исходного "
+    "сообщения не считай независимыми подтверждениями. similar_message_refs и близость формулировок считай только подсказкой для "
+    "сопоставления: это не доказательство одного события, одного факта или независимого подтверждения. Не достраивай отсутствующие "
+    "факты, включая автора действия, мотив, цель и причинность. Контекст или вывод "
     "добавляй только когда он прямо следует из материала и нужен для понимания; если факты самодостаточны, не дописывай "
     "обязательную аналитику и не ранжируй событие по значимости без опоры на материал. Внешние источники используй точечно для "
     "первоисточника, документа, точной цифры или необходимого контекста. Служебные поля используй только для внутреннего "
@@ -4484,10 +4547,13 @@ SOURCE_RULES = (
 DIGEST_REQUEST = (
     "Подготовь итоговый редакторский дайджест за выбранный период. У точных повторов inherited_fields восстанавливай из "
     "родительской публикации по inherits_from_message_key. Основной дайджест всегда строй по всему содержательному материалу "
-    "текущей выгрузки из news_messages и operational_messages за выбранный период. changes_since_previous_digest — только "
-    "дополнительный слой сравнения: он не задаёт временные границы основного дайджеста, не заменяет его и не является фильтром "
-    "отбора. Если changes_since_previous_digest.comparison_available=true, используй его ссылки только для определения новых и "
-    "содержательно изменённых публикаций и, при существенных изменениях, для отдельного блока «Что изменилось». Сообщения, уже "
+    "news_messages и operational_messages: эти массивы относятся именно к выбранному периоду. changes_since_previous_digest — "
+    "только дополнительный слой сравнения: он не задаёт временные границы основного дайджеста, не заменяет его и не является "
+    "фильтром отбора. changes_since_previous_digest.outside_period_changes может содержать публикации, исходно размещённые раньше "
+    "выбранного периода, но изменившиеся после предыдущего выпуска; используй их только для понимания развития сюжета или блока "
+    "«Что изменилось» и не расширяй ими основной временной интервал. Если changes_since_previous_digest.comparison_available=true, "
+    "используй его ссылки только для определения новых и содержательно изменённых публикаций и, при существенных изменениях, "
+    "для отдельного блока «Что изменилось». Сообщения, уже "
     "присутствовавшие в предыдущем выпуске, не исключай из основного дайджеста, если они нужны для полной картины выбранного "
     "периода. Изменение одних просмотров, реакций, пересылок или комментариев новой новостью не считай. Используй "
     "related_message_groups для распознавания перепечаток и общего источника, сохраняя содержательные различия. "
@@ -4561,6 +4627,31 @@ def make_compact_message_ref(message):
             "date_local"
         ),
     }
+
+
+def prepare_message_for_ai(message):
+    """
+    Не повторяет raw_text, когда он побайтно совпадает с text.
+    raw_text_available остаётся признаком того, что исходный текст известен.
+    """
+    result = copy.deepcopy(message)
+
+    def compact(item):
+        if not isinstance(item, dict):
+            return
+
+        if (
+            item.get("raw_text_available") is True
+            and item.get("raw_text") == item.get("text")
+        ):
+            item.pop("raw_text", None)
+
+        for key in ("duplicates", "previous_versions"):
+            for child in item.get(key) or []:
+                compact(child)
+
+    compact(result)
+    return result
 
 
 def _v4_build_changes_block(
@@ -4681,6 +4772,33 @@ def _v4_save_output(
         previous_run_utc,
     )
 
+    outside_period_changes = [
+        message
+        for message in raw_messages
+        if message.get("in_selected_period", True) is False
+        and message.get("change_status") in {
+            "new_since_previous_digest",
+            "edited_since_previous_digest",
+            "unavailable_since_previous_digest",
+        }
+    ]
+    changes_block["outside_period_changes"] = [
+        prepare_message_for_ai(message)
+        for message in outside_period_changes
+    ]
+    changes_block["outside_period_change_count"] = len(
+        outside_period_changes
+    )
+
+    exported_news_messages = [
+        prepare_message_for_ai(message)
+        for message in news_messages
+    ]
+    exported_operational_messages = [
+        prepare_message_for_ai(message)
+        for message in operational_messages
+    ]
+
     payload = {
         "meta": {
             "collector_version": APP_VERSION,
@@ -4796,8 +4914,13 @@ def _v4_save_output(
                 ],
             },
 
-            "raw_messages_in_period": len(
-                raw_messages
+            "raw_messages_in_period": sum(
+                1
+                for message in raw_messages
+                if message.get("in_selected_period", True)
+            ),
+            "change_context_messages_outside_period": len(
+                outside_period_changes
             ),
             "news_messages_after_cleanup": len(
                 news_messages
@@ -4841,6 +4964,12 @@ def _v4_save_output(
             ),
 
             "digest_profile_version": DIGEST_PROFILE_VERSION,
+            "raw_text_representation": (
+                "Если raw_text отсутствует при raw_text_available=true, "
+                "он полностью совпадает с text и не повторён для экономии токенов. "
+                "raw_text_available=false означает, что исходный текст до очистки "
+                "не был сохранён старой версией."
+            ),
             "usage_hint": (
                 "Файл подготовлен для пользовательского анализа в выбранном "
                 "ИИ-ассистенте, например ChatGPT. Готовая редакционная инструкция "
@@ -4866,9 +4995,9 @@ def _v4_save_output(
             related_groups
         ),
 
-        "news_messages": news_messages,
+        "news_messages": exported_news_messages,
         "operational_messages": (
-            operational_messages
+            exported_operational_messages
         ),
     }
 
@@ -5734,6 +5863,12 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
                 "quick_check_ok": db_maintenance.get("quick_check_ok"),
                 "quick_check_result": db_maintenance.get("quick_check_result"),
             },
+            "raw_text_representation": (
+                "Если raw_text отсутствует при raw_text_available=true, "
+                "он полностью совпадает с text и не повторён для экономии токенов. "
+                "raw_text_available=false означает, что исходный текст до очистки "
+                "не был сохранён старой версией."
+            ),
             "usage_hint": (
                 "Локальный структурированный JSON-экспорт для пользовательского "
                 "анализа в выбранном ИИ-ассистенте, например ChatGPT. Вопрос, "
@@ -5761,8 +5896,14 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
             "latest_direct_match_utc": result["latest_direct_match_utc"],
             "channels_with_direct_hits": result["channels_with_direct_hits"],
         },
-        "search_results": result["direct_results"],
-        "related_context": result["related_context"],
+        "search_results": [
+            prepare_message_for_ai(message)
+            for message in result["direct_results"]
+        ],
+        "related_context": [
+            prepare_message_for_ai(message)
+            for message in result["related_context"]
+        ],
         "related_message_groups": result["related_message_groups"],
     }
 
@@ -6548,9 +6689,15 @@ async def _v4_main():
             )
         )
 
+        period_messages = [
+            message
+            for message in raw_messages
+            if message.get("in_selected_period", True)
+        ]
+
         news, operational = (
             split_operational(
-                raw_messages,
+                period_messages,
                 settings,
             )
         )
@@ -6927,12 +7074,34 @@ def open_db():
         raise
 
 
+def stored_semantic_message(row):
+    data = dict(row)
+    return {
+        "text": data.get("text"),
+        "media": json_loads(data.get("media_json"), {}),
+        "album_id": data.get("album_id"),
+        "reply_to_message_id": data.get("reply_to_message_id"),
+        "post_author": data.get("post_author"),
+        "forwarded_from": json_loads(data.get("forwarded_from_json"), None),
+        "canonical_urls": json_loads(data.get("canonical_urls_json"), []),
+    }
+
+
 def upsert_message(conn, message):
     key = (int(message['channel_id']), int(message['message_id']))
     old = conn.execute('SELECT * FROM messages WHERE channel_id=? AND message_id=?',key).fetchone()
-    if old is not None and (old['text'] != message.get('text') or
-        old['media_json'] != json_dumps(message.get('media',{})) or
-        (old['raw_text'] is not None and old['raw_text'] != message.get('raw_text'))):
+    semantic_changed = False
+    raw_changed = False
+    if old is not None:
+        semantic_changed = (
+            semantic_content_hash(stored_semantic_message(old))
+            != semantic_content_hash(message)
+        )
+        raw_changed = (
+            old['raw_text'] is not None
+            and old['raw_text'] != message.get('raw_text')
+        )
+    if old is not None and (semantic_changed or raw_changed):
         snapshot = dict(old)
         conn.execute('INSERT INTO message_versions(channel_id,message_id,captured_utc,snapshot_json) VALUES(?,?,?,?)',
                      (*key,iso_utc(utc_now()),json_dumps(snapshot)))
@@ -6959,6 +7128,47 @@ def db_row_to_message(row, previous_run_utc):
     return result
 
 
+def normalize_previous_version(snapshot, captured_utc):
+    """Оставляет в истории редакций только поля, помогающие понять изменение."""
+    result = {
+        "captured_utc": captured_utc,
+        "text": snapshot.get("text"),
+        "raw_text": snapshot.get("raw_text"),
+        "raw_text_available": snapshot.get("raw_text") is not None,
+    }
+
+    for field in (
+        "edit_date_utc",
+        "edit_date_local",
+        "album_id",
+        "reply_to_message_id",
+        "post_author",
+    ):
+        value = snapshot.get(field)
+        if value is not None:
+            result[field] = value
+
+    media = json_loads(snapshot.get("media_json"), {})
+    if media:
+        result["media"] = media
+
+    forwarded_from = enrich_forward_info_links(
+        json_loads(snapshot.get("forwarded_from_json"), None)
+    )
+    if forwarded_from:
+        result["forwarded_from"] = forwarded_from
+
+    external_urls = json_loads(snapshot.get("external_urls_json"), [])
+    if external_urls:
+        result["external_urls"] = external_urls
+
+    canonical_urls = json_loads(snapshot.get("canonical_urls_json"), [])
+    if canonical_urls:
+        result["canonical_urls"] = canonical_urls
+
+    return result
+
+
 def attach_versions(conn, messages, limit=10):
     limit = max(0, int(limit))
     for start in range(0, len(messages), 250):
@@ -6978,7 +7188,12 @@ def attach_versions(conn, messages, limit=10):
             item['versions_count'] = row['total']
             item['versions_truncated'] = row['total'] > limit
             if limit:
-                item['previous_versions'].append(dict(captured_utc=row['captured_utc'], **json_loads(row['snapshot_json'],{})))
+                item['previous_versions'].append(
+                    normalize_previous_version(
+                        json_loads(row['snapshot_json'], {}),
+                        row['captured_utc'],
+                    )
+                )
     return messages
 
 
@@ -7042,12 +7257,18 @@ def load_messages_for_export(conn, channels, hours, previous_run_utc, settings=N
     ids=[int(c['id']) for c in channels]
     if not ids:
         return []
-    cutoff=iso_utc(utc_now()-timedelta(hours=hours))
+    cutoff_dt=utc_now()-timedelta(hours=hours)
+    cutoff=iso_utc(cutoff_dt)
     baseline=previous_run_utc or '9999'
     rows=conn.execute('''SELECT * FROM messages WHERE channel_id IN ('''+','.join('?' for _ in ids)+''')
         AND (date_utc>=? OR content_changed_utc>? OR unavailable_since_utc>?) ORDER BY date_utc''',
         (*ids,cutoff,baseline,baseline)).fetchall()
-    return attach_versions(conn,[db_row_to_message(r,previous_run_utc) for r in rows], max(0, int((settings or DEFAULT_SETTINGS).get('revision_export_limit', 3))))
+    messages=attach_versions(conn,[db_row_to_message(r,previous_run_utc) for r in rows],
+        max(0, int((settings or DEFAULT_SETTINGS).get('revision_export_limit', 3))))
+    for message in messages:
+        message_date=parse_dt(message.get('date_utc'))
+        message['in_selected_period']=bool(message_date and message_date>=cutoff_dt)
+    return messages
 
 
 def collapse_duplicates(messages, settings):
@@ -7479,6 +7700,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
     seen_keys = set()
     for _, _, index_rank, _, row, matched, direct_score, matched_terms, phrase_hit, sources in selected_ranked:
         message = db_row_to_message(row, None)
+        message.pop("change_status", None)
         key = (int(row['channel_id']), int(row['message_id']))
         seen_keys.add(key)
         message["search_match"] = {
@@ -7495,7 +7717,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
         direct.append(message)
 
     # 4) Совместимый остаток старого смыслового резерва.
-    # В 5.4.13 semantic_enabled принудительно False, поэтому Telegram-контент
+    # Начиная с 5.4.13 semantic_enabled принудительно False, поэтому Telegram-контент
     # обрабатывается только локальным FTS5/LIKE-поиском без ML-модели.
     semantic_meta = {
         'enabled': bool(settings.get('semantic_enabled', False)),
@@ -7525,6 +7747,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
             if len(direct) >= limit:
                 break
             message = db_row_to_message(row, None)
+            message.pop("change_status", None)
             message['search_match'] = {
                 'kind': 'semantic',
                 'semantic_score': round(float(similarity), 4),
@@ -7543,6 +7766,13 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
             'reason': 'disabled_in_current_version',
             'hint': 'Поиск работает локально через SQLite FTS5/LIKE без ML-модели.',
         })
+
+    direct = attach_versions(
+        conn,
+        direct,
+        max(0, int(settings.get("revision_export_limit", 3))),
+    )
+    related_groups = build_related_groups(direct)
 
     counts = Counter(m["channel"] for m in direct if m.get("channel"))
     dates = [m["date_utc"] for m in direct if m.get("date_utc")]
@@ -7579,7 +7809,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
         "truncated": overall_total > len(direct) or partial_pool_truncated,
         "direct_results": direct,
         "related_context": [],
-        "related_message_groups": [],
+        "related_message_groups": related_groups,
         "channels_with_direct_hits": [
             {"channel": name, "matches": count}
             for name, count in counts.most_common()
