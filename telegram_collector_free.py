@@ -4624,8 +4624,8 @@ def make_compact_message_ref(message):
 
 def prepare_message_for_ai(message):
     """
-    Не повторяет raw_text, когда он побайтно совпадает с text.
-    raw_text_available остаётся признаком того, что исходный текст известен.
+    Убирает из AI-ориентированного JSON только восстановимые повторы,
+    пустые коллекции и служебные значения по умолчанию.
     """
     result = copy.deepcopy(message)
 
@@ -4633,11 +4633,64 @@ def prepare_message_for_ai(message):
         if not isinstance(item, dict):
             return
 
+        raw_text = item.get("raw_text")
+        text = item.get("text")
         if (
             item.get("raw_text_available") is True
-            and item.get("raw_text") == item.get("text")
+            and isinstance(raw_text, str)
+            and isinstance(text, str)
+            and raw_text.strip() == text
         ):
             item.pop("raw_text", None)
+            item.pop("raw_text_available", None)
+
+        if item.get("in_selected_period") is True:
+            item.pop("in_selected_period", None)
+
+        if item.get("availability") == "available":
+            item.pop("availability", None)
+        item.pop("availability_checked_utc", None)
+        if item.get("unavailable_since_utc") is None:
+            item.pop("unavailable_since_utc", None)
+
+        for key in (
+            "reactions",
+            "external_urls",
+            "canonical_urls",
+            "duplicates",
+            "previous_versions",
+        ):
+            if item.get(key) == []:
+                item.pop(key, None)
+
+        media = item.get("media")
+        if isinstance(media, dict) and not any(
+            value is not None
+            for value in media.values()
+        ):
+            item.pop("media", None)
+
+        if item.get("versions_count") == 0:
+            item.pop("versions_count", None)
+            item.pop("versions_truncated", None)
+            item.pop("previous_versions", None)
+
+        for key in (
+            "username",
+            "channel_url",
+            "telegram_url",
+            "edit_date_utc",
+            "edit_date_local",
+            "views",
+            "forwards",
+            "replies",
+            "album_id",
+            "reply_to_message_id",
+            "post_author",
+            "forwarded_from",
+        ):
+            if item.get(key) is None:
+                item.pop(key, None)
 
         for key in ("duplicates", "previous_versions"):
             for child in item.get(key) or []:
@@ -4958,10 +5011,11 @@ def _v4_save_output(
 
             "digest_profile_version": DIGEST_PROFILE_VERSION,
             "raw_text_representation": (
-                "Если raw_text отсутствует при raw_text_available=true, "
-                "он полностью совпадает с text и не повторён для экономии токенов. "
-                "raw_text_available=false означает, что исходный текст до очистки "
-                "не был сохранён старой версией."
+                "Если raw_text отсутствует и raw_text_available не равно false, "
+                "исходный текст совпадает с text после удаления краевых пробелов и "
+                "не повторён. raw_text_available=false означает, что исходный текст "
+                "до очистки не был сохранён старой версией. Пустые необязательные "
+                "поля и обычное availability=available также не повторяются."
             ),
             "usage_hint": (
                 "Файл подготовлен для пользовательского анализа в выбранном "
@@ -5857,10 +5911,11 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
                 "quick_check_result": db_maintenance.get("quick_check_result"),
             },
             "raw_text_representation": (
-                "Если raw_text отсутствует при raw_text_available=true, "
-                "он полностью совпадает с text и не повторён для экономии токенов. "
-                "raw_text_available=false означает, что исходный текст до очистки "
-                "не был сохранён старой версией."
+                "Если raw_text отсутствует и raw_text_available не равно false, "
+                "исходный текст совпадает с text после удаления краевых пробелов и "
+                "не повторён. raw_text_available=false означает, что исходный текст "
+                "до очистки не был сохранён старой версией. Пустые необязательные "
+                "поля и обычное availability=available также не повторяются."
             ),
             "usage_hint": (
                 "Локальный структурированный JSON-экспорт для пользовательского "
@@ -7959,8 +8014,8 @@ function detail(parent,label,text){const d=node('details'),s=node('summary',labe
 function sourceNode(text,value){try{const url=new URL(value);if(url.protocol==='https:'&&url.hostname==='t.me'){const link=node('a',text,'channel');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';return link;}}catch(e){}return node('span',text,'channel');}
 function card(m){const a=node('article'),top=node('div',undefined,'meta');top.append(sourceNode(m.channel||'Источник',m.telegram_url||m.channel_url),node('span',m.date_local||m.date_utc||''));const k=kind(m);if(k)top.append(node('span',labels[k],'badge '+k));if(m.operational)top.append(node('span','Оперативное','badge'));if(m.search_match?.kind==='semantic')top.append(node('span','По смыслу','badge'));a.append(top,node('div',m.text||'[Без текста]','body'));
 if(m.version_note)a.append(node('p',m.version_note,'note'));
-if(m.raw_text_available)detail(a,'Исходный текст до очистки',m.raw_text||'[Публикация без подписи]');
-else a.append(node('p','Оригинал до очистки ещё не получен: запись создана старой версией.','note'));
+if(m.raw_text_available===false)a.append(node('p','Оригинал до очистки ещё не получен: запись создана старой версией.','note'));
+else detail(a,'Исходный текст до очистки',m.raw_text??m.text??'[Публикация без подписи]');
 for(const v of m.previous_versions||[])detail(a,'Предыдущая редакция · сохранена '+v.captured_utc,(v.raw_text===null?'[Оригинал до очистки не сохранён]\n':'')+(v.raw_text??v.text??''));
 if(m.versions_truncated)a.append(node('p','Показаны последние редакции; остальные сохранены в базе.','note'));
 if((m.duplicates||[]).length){const d=node('details');d.append(node('summary','Точные повторы: '+m.duplicates.length));for(const dup of m.duplicates)d.append(card({...dup,duplicates:[]}));a.append(d);}
