@@ -2160,6 +2160,15 @@ def semantic_content_hash(message):
         # после обновления версии не является содержательной правкой поста.
         media.pop("identity", None)
 
+    forwarded_from = copy.deepcopy(
+        message.get("forwarded_from")
+    )
+    if isinstance(forwarded_from, dict):
+        # Эти URL вычисляются из chat_username/channel_post и сами по себе
+        # не означают изменение исходной Telegram-публикации.
+        forwarded_from.pop("channel_url", None)
+        forwarded_from.pop("telegram_url", None)
+
     relevant = {
         "text": message.get("text"),
         "media": media,
@@ -2172,9 +2181,7 @@ def semantic_content_hash(message):
             "canonical_urls",
             [],
         ),
-        "forwarded_from": message.get(
-            "forwarded_from"
-        ),
+        "forwarded_from": forwarded_from,
     }
 
     raw = json.dumps(
@@ -4365,9 +4372,15 @@ def build_related_groups(messages):
             "origin_key"
         )
         if origin_key:
-            relation_keys.append(
-                "origin:" + origin_key
-            )
+            use_origin_key = True
+            if origin_key.startswith("url:"):
+                use_origin_key = is_specific_shared_source_url(
+                    origin_key[4:]
+                )
+            if use_origin_key:
+                relation_keys.append(
+                    "origin:" + origin_key
+                )
 
         for url in message.get(
             "canonical_urls",
@@ -7137,7 +7150,9 @@ def stored_semantic_message(row):
         "album_id": data.get("album_id"),
         "reply_to_message_id": data.get("reply_to_message_id"),
         "post_author": data.get("post_author"),
-        "forwarded_from": json_loads(data.get("forwarded_from_json"), None),
+        "forwarded_from": enrich_forward_info_links(
+            json_loads(data.get("forwarded_from_json"), None)
+        ),
         "canonical_urls": canonical_urls,
     }
 
