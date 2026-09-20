@@ -1,10 +1,21 @@
-﻿param(
+param(
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist')
 )
 
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
 $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
+$manifestPath = Join-Path $root 'release_manifest.psd1'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw 'release_manifest.psd1 not found.'
+}
+$manifest = Import-PowerShellDataFile -LiteralPath $manifestPath
+$programFiles = @($manifest.ProgramFiles)
+if (-not $programFiles.Count) { throw 'Release manifest has no ProgramFiles.' }
+if (@($programFiles | Select-Object -Unique).Count -ne $programFiles.Count) {
+    throw 'Release manifest contains duplicate ProgramFiles.'
+}
+
 $versionMatch = Select-String -LiteralPath (Join-Path $root 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"'
 if (-not $versionMatch) { throw 'Could not determine APP_VERSION.' }
 $versionRaw = $versionMatch.Matches[0].Groups[1].Value
@@ -27,19 +38,24 @@ if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 if (Test-Path -LiteralPath $zipChecksum) { Remove-Item -LiteralPath $zipChecksum -Force }
 New-Item -ItemType Directory -Path $package -Force | Out-Null
 
-$copied = @(
-    'INSTALL.bat', 'install.ps1', 'README.md', 'LICENSE', 'SECURITY.md',
-    'requirements.txt', 'run_python.bat', 'start_free.bat',
-    'telegram_collector_free.py'
-)
-foreach ($name in $copied) {
+$generated = @('Telegram_Digest.exe', 'Telegram_Digest.exe.sha256')
+foreach ($name in $programFiles) {
+    if ($name -in $generated) { continue }
+    if ([IO.Path]::IsPathRooted($name) -or $name -match '(^|[\\/])\.\.([\\/]|$)') {
+        throw "Unsafe release manifest path: $name"
+    }
     $source = Join-Path $root $name
-    if (-not (Test-Path -LiteralPath $source)) { throw "Required release file not found: $name" }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $package $name) -Force
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Required release file not found: $name"
+    }
+    $destination = Join-Path $package $name
+    $destinationDirectory = Split-Path -Parent $destination
+    if (-not (Test-Path -LiteralPath $destinationDirectory)) {
+        New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
-# Launcher в release всегда собирается из актуального исходника.
-# Так пакет не зависит от старого prebuilt EXE в корне репозитория.
 $launcher = Join-Path $package 'Telegram_Digest.exe'
 & (Join-Path $root 'launcher\build_launcher.ps1') -OutputPath $launcher
 if (-not (Test-Path -LiteralPath $launcher)) {
@@ -52,6 +68,21 @@ $checksumText = $launcherHash + '  Telegram_Digest.exe' + [Environment]::NewLine
     $checksumText,
     [Text.UTF8Encoding]::new($false)
 )
+
+$actualFiles = @(
+    Get-ChildItem -LiteralPath $package -Recurse -File -Force |
+    ForEach-Object {
+        $_.FullName.Substring($package.Length).TrimStart('\') -replace '\\', '/'
+    } |
+    Sort-Object
+)
+$expectedFiles = @($programFiles | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object)
+$difference = @(Compare-Object -ReferenceObject $expectedFiles -DifferenceObject $actualFiles)
+if ($difference.Count -or $actualFiles.Count -ne $expectedFiles.Count) {
+    $difference | Format-Table | Out-String | Write-Error
+    throw 'Release package does not match release_manifest.psd1.'
+}
+
 $forbiddenPattern = '(^|[\\/])(credentials(?:\.unreadable-[^\\/]*)?\.bin|[^\\/]*\.session(?:-journal)?|news\.db(?:-[^\\/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|[\\/])(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)([\\/]|$)'
 $forbidden = @(Get-ChildItem -LiteralPath $package -Recurse -Force | Where-Object {
     $_.FullName.Substring($package.Length).TrimStart('\') -match $forbiddenPattern
@@ -62,7 +93,7 @@ Compress-Archive -LiteralPath $package -DestinationPath $zip -CompressionLevel O
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
 [IO.File]::WriteAllText(
     $zipChecksum,
-    "$hash  $([IO.Path]::GetFileName($zip))`r`n",
+    ("$hash  $([IO.Path]::GetFileName($zip))" + [Environment]::NewLine),
     [Text.UTF8Encoding]::new($false)
 )
 

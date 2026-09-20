@@ -54,7 +54,7 @@ jobs:
       - name: Validate PowerShell scripts
         shell: powershell
         run: |
-          foreach ($path in @('.\install.ps1', '.\scripts\build_release.ps1', '.\launcher\build_launcher.ps1', '.\launcher\build_icon.ps1')) {
+          foreach ($path in @('.\install.ps1', '.\update.ps1', '.\scripts\build_release.ps1', '.\launcher\build_launcher.ps1', '.\launcher\build_icon.ps1')) {
             $text = Get-Content -LiteralPath $path -Raw
             [void][ScriptBlock]::Create($text)
           }
@@ -104,18 +104,14 @@ jobs:
           finally {
             $archive.Dispose()
           }
-          $expected = @(
-            'INSTALL.bat', 'LICENSE', 'README.md', 'SECURITY.md',
-            'Telegram_Digest.exe', 'Telegram_Digest.exe.sha256', 'install.ps1',
-            'requirements.txt', 'run_python.bat', 'start_free.bat',
-            'telegram_collector_free.py'
-          ) | Sort-Object
+          $manifest = Import-PowerShellDataFile .\release_manifest.psd1
+          $expected = @($manifest.ProgramFiles | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object)
           $difference = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
           if ($difference.Count) {
             $difference | Format-Table | Out-String | Write-Error
-            throw 'Release ZIP does not match the exact whitelist.'
+            throw 'Release ZIP does not match release_manifest.psd1.'
           }
-          if ($actual.Count -ne 11) { throw "Expected 11 files, found $($actual.Count)." }
+          if ($actual.Count -ne $expected.Count) { throw "Expected $($expected.Count) files, found $($actual.Count)." }
 
       - name: Upload verified release files
         uses: actions/upload-artifact@v7
