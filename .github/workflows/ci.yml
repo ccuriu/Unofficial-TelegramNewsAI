@@ -91,8 +91,23 @@ jobs:
           if ($packages.Count -ne 1) { throw "Expected exactly one release package directory, found $($packages.Count)." }
           $package = $packages[0].FullName
           $installer = Join-Path $package 'install.ps1'
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -NoShortcut
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
           if ($LASTEXITCODE -ne 0) { throw "Clean install failed: $LASTEXITCODE" }
+
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $shortcutPath = Join-Path $desktop 'Unofficial TelegramNewsAI.lnk'
+          if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+            throw 'Clean install did not create the desktop shortcut.'
+          }
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut($shortcutPath)
+          if ($shortcut.TargetPath -ine (Join-Path $package 'Telegram_Digest.exe')) {
+            throw "Shortcut target is wrong: $($shortcut.TargetPath)"
+          }
+          if ($shortcut.WorkingDirectory -ine $package) {
+            throw "Shortcut working directory is wrong: $($shortcut.WorkingDirectory)"
+          }
+          Remove-Item -LiteralPath $shortcutPath -Force
 
           $venvPython = Join-Path $package '.venv\Scripts\python.exe'
           if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
