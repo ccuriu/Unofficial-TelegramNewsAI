@@ -104,12 +104,12 @@ jobs:
           finally {
             $archive.Dispose()
           }
-          $manifest = Import-PowerShellDataFile .\release_manifest.psd1
+          $manifest = Get-Content .\release_manifest.json -Raw -Encoding UTF8 | ConvertFrom-Json
           $expected = @($manifest.ProgramFiles | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object)
           $difference = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
           if ($difference.Count) {
             $difference | Format-Table | Out-String | Write-Error
-            throw 'Release ZIP does not match release_manifest.psd1.'
+            throw 'Release ZIP does not match release_manifest.json.'
           }
           if ($actual.Count -ne $expected.Count) { throw "Expected $($expected.Count) files, found $($actual.Count)." }
 

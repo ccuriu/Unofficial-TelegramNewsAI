@@ -1876,9 +1876,9 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_release_builder_uses_exact_maintenance_distribution(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
-        manifest = (ROOT / "release_manifest.psd1").read_text(encoding="utf-8-sig")
-        self.assertIn("Import-PowerShellDataFile", builder)
-        self.assertIn("release_manifest.psd1", builder)
+        manifest = (ROOT / "release_manifest.json").read_text(encoding="utf-8-sig")
+        self.assertIn("ConvertFrom-Json", builder)
+        self.assertIn("release_manifest.json", builder)
         for required in ("'LICENSE'", "'SECURITY.md'", "'Telegram_Digest.exe.sha256'", "'UPDATE.bat'", "'update.ps1'"):
             self.assertIn(required, manifest)
         self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)

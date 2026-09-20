@@ -5,11 +5,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
 $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
-$manifestPath = Join-Path $root 'release_manifest.psd1'
+$manifestPath = Join-Path $root 'release_manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-    throw 'release_manifest.psd1 not found.'
+    throw 'release_manifest.json not found.'
 }
-$manifest = Import-PowerShellDataFile -LiteralPath $manifestPath
+$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $programFiles = @($manifest.ProgramFiles)
 if (-not $programFiles.Count) { throw 'Release manifest has no ProgramFiles.' }
 if (@($programFiles | Select-Object -Unique).Count -ne $programFiles.Count) {
@@ -80,7 +80,7 @@ $expectedFiles = @($programFiles | ForEach-Object { $_ -replace '\\', '/' } | So
 $difference = @(Compare-Object -ReferenceObject $expectedFiles -DifferenceObject $actualFiles)
 if ($difference.Count -or $actualFiles.Count -ne $expectedFiles.Count) {
     $difference | Format-Table | Out-String | Write-Error
-    throw 'Release package does not match release_manifest.psd1.'
+    throw 'Release package does not match release_manifest.json.'
 }
 
 $forbiddenPattern = '(^|[\\/])(credentials(?:\.unreadable-[^\\/]*)?\.bin|[^\\/]*\.session(?:-journal)?|news\.db(?:-[^\\/]*)?|settings_free\.json|selected_channels\.json|collector\.lock)$|(^|[\\/])(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)([\\/]|$)'

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -10,14 +11,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 UPDATE_PS1 = ROOT / "update.ps1"
-MANIFEST = ROOT / "release_manifest.psd1"
+MANIFEST = ROOT / "release_manifest.json"
 
 PROGRAM_FILES = [
     "INSTALL.bat",
     "install.ps1",
     "UPDATE.bat",
     "update.ps1",
-    "release_manifest.psd1",
+    "release_manifest.json",
     "README.md",
     "LICENSE",
     "SECURITY.md",
@@ -46,9 +47,9 @@ OLD_RELEASE_FILES = [
 
 class UpdaterContractTests(unittest.TestCase):
     def test_manifest_whitelist_excludes_user_state(self):
-        manifest = MANIFEST.read_text(encoding="utf-8-sig")
-        for name in PROGRAM_FILES:
-            self.assertIn("'" + name + "'", manifest)
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["ProgramFiles"], PROGRAM_FILES)
+        self.assertEqual(manifest["ObsoleteFiles"], [])
 
         forbidden = [
             "credentials.bin",
@@ -60,16 +61,15 @@ class UpdaterContractTests(unittest.TestCase):
             "logs",
             ".venv",
         ]
-        program_block = manifest.split("ObsoleteFiles", 1)[0]
         for name in forbidden:
-            self.assertNotIn("'" + name + "'", program_block)
+            self.assertNotIn(name, manifest["ProgramFiles"])
 
     def test_builder_and_ci_share_release_manifest(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("Import-PowerShellDataFile", builder)
-        self.assertIn("release_manifest.psd1", builder)
-        self.assertIn("release_manifest.psd1", workflow)
+        self.assertIn("ConvertFrom-Json", builder)
+        self.assertIn("release_manifest.json", builder)
+        self.assertIn("release_manifest.json", workflow)
         self.assertNotIn("$copied = @(", builder)
 
     def test_updater_contract_is_file_only_and_preserving(self):
@@ -79,7 +79,7 @@ class UpdaterContractTests(unittest.TestCase):
             "AllowDowngrade",
             "Get-StateSnapshot",
             "Get-FileHash",
-            "Import-PowerShellDataFile",
+            "ConvertFrom-Json",
             "install.ps1",
             "--self-test",
             "ObsoleteFiles",
@@ -171,7 +171,7 @@ class UpdaterWindowsIntegrationTests(unittest.TestCase):
     def _write_release(self, version="9.9.9 Testing", fail_install=False):
         shutil.copy2(UPDATE_PS1, self.source / "update.ps1")
         shutil.copy2(ROOT / "UPDATE.bat", self.source / "UPDATE.bat")
-        shutil.copy2(MANIFEST, self.source / "release_manifest.psd1")
+        shutil.copy2(MANIFEST, self.source / "release_manifest.json")
 
         for name in PROGRAM_FILES:
             path = self.source / name
@@ -286,7 +286,7 @@ class UpdaterWindowsIntegrationTests(unittest.TestCase):
         self.assertNotEqual((self.target / "credentials.bin").read_bytes(), b"evil-new-credentials")
         self.assertTrue((self.target / "UPDATE.bat").exists())
         self.assertTrue((self.target / "update.ps1").exists())
-        self.assertTrue((self.target / "release_manifest.psd1").exists())
+        self.assertTrue((self.target / "release_manifest.json").exists())
 
     def test_rollback_restores_old_program_files(self):
         self._write_release(fail_install=True)
@@ -304,7 +304,7 @@ class UpdaterWindowsIntegrationTests(unittest.TestCase):
 
         self.assertFalse((self.target / "UPDATE.bat").exists())
         self.assertFalse((self.target / "update.ps1").exists())
-        self.assertFalse((self.target / "release_manifest.psd1").exists())
+        self.assertFalse((self.target / "release_manifest.json").exists())
         for name, content in self.user_files.items():
             self.assertEqual((self.target / name).read_bytes(), content, name)
 

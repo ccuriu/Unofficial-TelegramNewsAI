@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $sourceDir = [IO.Path]::GetFullPath(
     (Split-Path -Parent $MyInvocation.MyCommand.Path)
 ).TrimEnd('\')
-$manifestPath = Join-Path $sourceDir 'release_manifest.psd1'
+$manifestPath = Join-Path $sourceDir 'release_manifest.json'
 $shortcutName = 'Unofficial TelegramNewsAI.lnk'
 
 function Get-AppVersion([string]$Root) {
@@ -301,12 +301,12 @@ function Copy-ManagedFile([string]$SourceRoot, [string]$DestinationRoot, [string
 }
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-    Write-Host 'ОШИБКА: release_manifest.psd1 отсутствует рядом с UPDATE.bat.'
+    Write-Host 'ОШИБКА: release_manifest.json отсутствует рядом с UPDATE.bat.'
     exit 1
 }
 
 try {
-    $manifest = Import-PowerShellDataFile -LiteralPath $manifestPath
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $validated = Assert-ProgramManifest $manifest
     $programFiles = @($validated.ProgramFiles)
     $obsoleteFiles = @($validated.ObsoleteFiles)
