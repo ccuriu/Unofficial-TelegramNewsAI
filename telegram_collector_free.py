@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.16 Testing"
+APP_VERSION = "5.4.17 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
@@ -5889,6 +5889,7 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
             "artifact_type": "telegram_topic_search_digest",
             "collector_version": APP_VERSION,
             "schema_version": EXPORT_SCHEMA_VERSION,
+            "digest_profile_version": DIGEST_PROFILE_VERSION,
             "created_local": now.isoformat(timespec="seconds"),
             "created_utc": iso_utc(now.astimezone(timezone.utc)),
             "search_intent": {
@@ -7465,7 +7466,7 @@ SEARCH_ALIASES = [
     # Частый украинский именованный объект. Благодаря двум отдельным
     # группам запрос «Новая почта» находит «Нова пошта» и Nova Poshta,
     # но только когда совпали ОБА смысловых компонента.
-    ('новая','новой','новую','новые','новых','нова','нової','нову','нові','нових','nova'),
+    ('новая','новой','новую','нова','нової','новій','нову','новою','nova'),
     ('почта','почты','почте','почту','почтой','почтою','пошта','пошти','пошті','пошту','поштою','poshta'),
 ]
 
