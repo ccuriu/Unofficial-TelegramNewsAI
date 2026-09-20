@@ -4584,6 +4584,7 @@ def calculate_change_summary(messages):
         "new_since_previous_digest": 0,
         "edited_since_previous_digest": 0,
         "metrics_changed_since_previous_digest": 0,
+        "unavailable_since_previous_digest": 0,
         "existing_in_period": 0,
         "first_digest": 0,
     }
