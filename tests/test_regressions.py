@@ -1363,6 +1363,111 @@ class OfflineRegressionTests(unittest.TestCase):
         ]
         self.assertEqual(collector.build_related_groups(messages), [])
 
+    def test_max_profile_url_does_not_create_false_related_group(self):
+        profile_url = "https://max.ru/SolovievLive"
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": [profile_url],
+            },
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 20,
+                "canonical_urls": [profile_url],
+            },
+        ]
+        self.assertIsNone(collector.make_origin_key(None, [profile_url]))
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_other_max_profile_url_does_not_create_false_related_group(self):
+        profile_url = "https://max.ru/belarusian_silovik"
+        messages = [
+            {
+                "channel_id": 2,
+                "channel": "Белорусский силовик",
+                "message_id": 11,
+                "canonical_urls": [profile_url],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Белорусский силовик",
+                "message_id": 21,
+                "canonical_urls": [profile_url],
+            },
+        ]
+        self.assertIsNone(collector.make_origin_key(None, [profile_url]))
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_legacy_max_profile_origin_key_does_not_create_related_group(self):
+        legacy_origin = "url:https://max.ru/SolovievLive"
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": [],
+                "origin_key": legacy_origin,
+            },
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 20,
+                "canonical_urls": [],
+                "origin_key": legacy_origin,
+            },
+        ]
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_telegram_channel_root_is_not_specific_source(self):
+        channel_url = "https://t.me/channel"
+        self.assertFalse(collector.is_specific_shared_source_url(channel_url))
+        self.assertIsNone(collector.make_origin_key(None, [channel_url]))
+
+    def test_telegram_post_remains_specific_source(self):
+        post_url = "https://t.me/channel/123"
+        self.assertTrue(collector.is_specific_shared_source_url(post_url))
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": [post_url],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "canonical_urls": [post_url],
+            },
+        ]
+        self.assertEqual(len(collector.build_related_groups(messages)), 1)
+
+    def test_external_article_remains_specific_source(self):
+        article_url = "https://example.com/news/some-article"
+        self.assertTrue(collector.is_specific_shared_source_url(article_url))
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": [article_url],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "canonical_urls": [article_url],
+            },
+        ]
+        self.assertEqual(len(collector.build_related_groups(messages)), 1)
+
+    def test_max_post_with_material_identifier_remains_specific_source(self):
+        post_url = "https://max.ru/channel_vmax/AZ9FDVpHASw"
+        self.assertTrue(collector.is_specific_shared_source_url(post_url))
+
     def test_related_group_member_keeps_telegram_url(self):
         common_url = "https://example.test/source"
         messages = [
@@ -1856,7 +1961,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Текущая версия — 5.4.15 Testing",
+            "Текущая версия — 5.4.16 Testing",
             readme,
         )
         self.assertIn(
