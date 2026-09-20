@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.15 Testing"
+APP_VERSION = "5.4.16 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
@@ -1965,8 +1965,8 @@ def normalize_external_urls(urls):
 def is_specific_shared_source_url(url):
     """
     Общая ссылка полезна как признак общего источника только когда она ведёт
-    на конкретный материал. Главная страница сайта или корень Telegram-канала
-    слишком слабы и могут ошибочно связать разные события.
+    на конкретный материал. Главная страница, профиль, канал или постоянная
+    служебная ссылка слишком слабы и могут ошибочно связать разные события.
     """
     if not isinstance(url, str):
         return False
@@ -1985,9 +1985,20 @@ def is_specific_shared_source_url(url):
         return False
 
     path = (parts.path or "").strip("/")
+    segments = [segment for segment in path.split("/") if segment]
+
     if host in {"t.me", "telegram.me"}:
-        segments = [segment for segment in path.split("/") if segment]
         return len(segments) >= 2 and segments[-1].isdigit()
+
+    # У MAX односегментный путь max.ru/<name> — это профиль/канал,
+    # а не конкретный пост. Ссылки-приглашения тоже относятся к каналу.
+    # Конкретные публикации имеют дополнительный идентификатор в пути.
+    if host == "max.ru":
+        if len(segments) < 2:
+            return False
+        if segments[0].lower() in {"join", "joinchannel"}:
+            return False
+        return True
 
     return bool(path or parts.query)
 
