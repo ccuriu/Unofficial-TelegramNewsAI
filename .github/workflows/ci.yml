@@ -134,13 +134,16 @@ jobs:
             'selected_channels.json',
             'settings_free.json',
             'news.db',
-            'Дайджесты',
-            'logs',
-            'Резервные_копии'
+            'logs'
           )) {
             if (Test-Path -LiteralPath (Join-Path $package $relative)) {
               throw "Fresh installation unexpectedly contains user state: $relative"
             }
+          }
+          $unexpectedDirs = @(Get-ChildItem -LiteralPath $package -Directory -Force |
+            Where-Object { $_.Name -ne '.venv' })
+          if ($unexpectedDirs.Count) {
+            throw "Fresh installation created unexpected local directories: $($unexpectedDirs.Name -join ', ')"
           }
 
       - name: Verify in-place update with real release candidate
@@ -171,12 +174,14 @@ jobs:
           foreach ($entry in $state.GetEnumerator()) {
             [IO.File]::WriteAllText((Join-Path $target $entry.Key), $entry.Value, [Text.UTF8Encoding]::new($false))
           }
-          New-Item -ItemType Directory -Path (Join-Path $target 'Дайджесты\Архив') -Force | Out-Null
-          [IO.File]::WriteAllText((Join-Path $target 'Дайджесты\Архив\old.json'), 'old-digest', [Text.UTF8Encoding]::new($false))
+          $digestDir = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('0JTQsNC50LTQttC10YHRgtGL'))
+          $backupDir = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('0KDQtdC30LXRgNCy0L3Ri9C1X9C60L7Qv9C40Lg='))
+          New-Item -ItemType Directory -Path (Join-Path $target ($digestDir + '\Archive')) -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $target ($digestDir + '\Archive\old.json')), 'old-digest', [Text.UTF8Encoding]::new($false))
           New-Item -ItemType Directory -Path (Join-Path $target 'logs') -Force | Out-Null
           [IO.File]::WriteAllText((Join-Path $target 'logs\old.log'), 'old-log', [Text.UTF8Encoding]::new($false))
-          New-Item -ItemType Directory -Path (Join-Path $target 'Резервные_копии') -Force | Out-Null
-          [IO.File]::WriteAllText((Join-Path $target 'Резервные_копии\old.bin'), 'old-backup', [Text.UTF8Encoding]::new($false))
+          New-Item -ItemType Directory -Path (Join-Path $target $backupDir) -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $target ($backupDir + '\old.bin')), 'old-backup', [Text.UTF8Encoding]::new($false))
 
           $before = @{}
           foreach ($name in $state.Keys) {
@@ -194,9 +199,9 @@ jobs:
             if ($after -ne $before[$name]) { throw "Updater changed protected state: $name" }
           }
           foreach ($relative in @(
-            'Дайджесты\Архив\old.json',
+            ($digestDir + '\Archive\old.json'),
             'logs\old.log',
-            'Резервные_копии\old.bin',
+            ($backupDir + '\old.bin'),
             '.venv\Scripts\python.exe'
           )) {
             if (-not (Test-Path -LiteralPath (Join-Path $target $relative))) {
