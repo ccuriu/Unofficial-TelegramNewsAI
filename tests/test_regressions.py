@@ -1256,6 +1256,30 @@ class OfflineRegressionTests(unittest.TestCase):
             "https://t.me/source_channel/321",
         )
 
+    def test_derived_forward_links_do_not_create_false_content_edit(self):
+        base = {
+            "text": "Одинаковый текст",
+            "media": {},
+            "album_id": None,
+            "reply_to_message_id": None,
+            "post_author": None,
+            "canonical_urls": [],
+            "forwarded_from": {
+                "chat_username": "source_channel",
+                "channel_post": 321,
+            },
+        }
+        enriched = dict(
+            base,
+            forwarded_from=collector.enrich_forward_info_links(
+                base["forwarded_from"]
+            ),
+        )
+        self.assertEqual(
+            collector.semantic_content_hash(base),
+            collector.semantic_content_hash(enriched),
+        )
+
     def test_private_forward_source_does_not_invent_url(self):
         info = collector.enrich_forward_info_links({
             "from_id": {"type": "channel", "id": 123},
@@ -1320,12 +1344,14 @@ class OfflineRegressionTests(unittest.TestCase):
                 "channel": "Канал A",
                 "message_id": 10,
                 "canonical_urls": ["https://example.test"],
+                "origin_key": "url:https://example.test",
             },
             {
                 "channel_id": 2,
                 "channel": "Канал B",
                 "message_id": 20,
                 "canonical_urls": ["https://example.test"],
+                "origin_key": "url:https://example.test",
             },
         ]
         self.assertEqual(collector.build_related_groups(messages), [])
