@@ -973,12 +973,48 @@ class OfflineRegressionTests(unittest.TestCase):
         text = "Одинаковая публикация с достаточно длинным текстом для проверки."
         kept, exact, near = self.collapse(text, text)
         self.assertEqual((len(kept), exact, near), (1, 1, 0))
-        self.assertEqual(kept[0]["duplicates"][0]["message_id"], 2)
+        duplicate = kept[0]["duplicates"][0]
+        self.assertEqual(duplicate["message_id"], 2)
+        self.assertEqual(duplicate["inherits_from_message_key"], "1:1")
+        self.assertIn("text", duplicate["inherited_fields"])
+        self.assertNotIn("text", duplicate)
+
+    def test_exact_duplicate_with_different_change_status_is_still_collapsed(self):
+        text = "Одинаковая публикация с достаточно длинным текстом для проверки статуса."
+        base = {
+            "channel_id": 1,
+            "message_id": 1,
+            "text": text,
+            "date_utc": collector.iso_utc(self.now),
+            "change_status": "existing",
+        }
+        other = dict(
+            base,
+            channel_id=2,
+            message_id=2,
+            change_status="new_since_previous_digest",
+        )
+        kept, exact, near = collector.collapse_duplicates(
+            [base, other], self.settings
+        )
+        self.assertEqual((len(kept), exact, near), (1, 1, 0))
+        self.assertEqual(
+            kept[0]["duplicates"][0]["change_status"],
+            "new_since_previous_digest",
+        )
 
     def test_similar_but_distinct_text_is_preserved(self):
         kept, exact, near = self.collapse(
             "В городе открыли новую школу на улице Садовой.",
             "В городе открыли новую больницу на улице Садовой.",
+        )
+        self.assertEqual((len(kept), exact, near), (2, 0, 0))
+
+    def test_new_name_is_not_removed_as_near_duplicate(self):
+        prefix = "Подробное сообщение о состоявшейся встрече и принятом решении. " * 6
+        kept, exact, near = self.collapse(
+            prefix + "Комментарий дал Иван Петров.",
+            prefix + "Комментарий дал Иван Сидоров.",
         )
         self.assertEqual((len(kept), exact, near), (2, 0, 0))
 
@@ -1012,6 +1048,41 @@ class OfflineRegressionTests(unittest.TestCase):
         result = self.search("архива")
         self.assertEqual(len(result["direct_results"]), 1)
         self.assertIsInstance(self.connection, sqlite3.Connection)
+
+    def test_topic_search_builds_related_groups_without_fake_change_status(self):
+        shared_url = "https://example.test/story/42"
+        for message_id in (1, 2):
+            self.add_message(
+                message_id,
+                "Проверочная тема с общим первичным источником",
+            )
+            self.connection.execute(
+                """
+                UPDATE messages
+                SET canonical_urls_json = ?, origin_key = ?
+                WHERE channel_id = 1 AND message_id = ?
+                """,
+                (
+                    __import__("json").dumps([shared_url]),
+                    "url:" + shared_url,
+                    message_id,
+                ),
+            )
+        self.connection.commit()
+
+        result = self.search("проверочная тема")
+        self.assertEqual(len(result["direct_results"]), 2)
+        self.assertEqual(len(result["related_message_groups"]), 1)
+        for message in result["direct_results"]:
+            self.assertNotIn("change_status", message)
+            self.assertIn("previous_versions", message)
+
+    def test_change_summary_counts_unavailable_separately(self):
+        summary = collector.calculate_change_summary([
+            {"change_status": "unavailable_since_previous_digest"}
+        ])
+        self.assertEqual(summary["unavailable_since_previous_digest"], 1)
+        self.assertEqual(summary["existing"], 0)
 
     def test_runs_schema_has_selection_fingerprint(self):
         columns = collector.table_columns(self.connection, "runs")
@@ -1181,6 +1252,49 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_invalid_public_username_is_not_linked(self):
         self.assertIsNone(collector.public_channel_link("not valid"))
 
+    def test_public_forward_source_gets_direct_post_url(self):
+        info = collector.enrich_forward_info_links({
+            "chat_username": "source_channel",
+            "channel_post": 321,
+        })
+        self.assertEqual(info["channel_url"], "https://t.me/source_channel")
+        self.assertEqual(
+            info["telegram_url"],
+            "https://t.me/source_channel/321",
+        )
+
+    def test_derived_forward_links_do_not_create_false_content_edit(self):
+        base = {
+            "text": "Одинаковый текст",
+            "media": {},
+            "album_id": None,
+            "reply_to_message_id": None,
+            "post_author": None,
+            "canonical_urls": [],
+            "forwarded_from": {
+                "chat_username": "source_channel",
+                "channel_post": 321,
+            },
+        }
+        enriched = dict(
+            base,
+            forwarded_from=collector.enrich_forward_info_links(
+                base["forwarded_from"]
+            ),
+        )
+        self.assertEqual(
+            collector.semantic_content_hash(base),
+            collector.semantic_content_hash(enriched),
+        )
+
+    def test_private_forward_source_does_not_invent_url(self):
+        info = collector.enrich_forward_info_links({
+            "from_id": {"type": "channel", "id": 123},
+            "channel_post": 321,
+        })
+        self.assertNotIn("channel_url", info)
+        self.assertNotIn("telegram_url", info)
+
     def test_normalized_message_export_keeps_telegram_url(self):
         message = collector.make_message(
             self.channel,
@@ -1230,6 +1344,25 @@ class OfflineRegressionTests(unittest.TestCase):
             "https://t.me/channel_b/2",
         )
 
+    def test_bare_homepage_does_not_create_false_related_group(self):
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": ["https://example.test"],
+                "origin_key": "url:https://example.test",
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "canonical_urls": ["https://example.test"],
+                "origin_key": "url:https://example.test",
+            },
+        ]
+        self.assertEqual(collector.build_related_groups(messages), [])
+
     def test_related_group_member_keeps_telegram_url(self):
         common_url = "https://example.test/source"
         messages = [
@@ -1260,6 +1393,199 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(
             [item["telegram_url"] for item in groups[0]["message_refs"]],
             ["https://t.me/channel_a/10", "https://t.me/channel_b/20"],
+        )
+
+    def test_prepare_message_for_ai_omits_only_redundant_raw_text(self):
+        same = collector.prepare_message_for_ai({
+            "channel_id": 1,
+            "message_id": 1,
+            "text": "Текст без удалённых строк",
+            "raw_text": "Текст без удалённых строк",
+            "raw_text_available": True,
+        })
+        self.assertNotIn("raw_text", same)
+        self.assertNotIn("raw_text_available", same)
+
+        compact_defaults = collector.prepare_message_for_ai({
+            "channel_id": 1,
+            "message_id": 10,
+            "text": "Проверка пустых значений",
+            "reactions": [],
+            "external_urls": [],
+            "canonical_urls": [],
+            "duplicates": [],
+            "media": {
+                "type": None,
+                "mime_type": None,
+                "file_name": None,
+                "identity": None,
+            },
+            "versions_count": 0,
+            "versions_truncated": False,
+            "previous_versions": [],
+            "availability": "available",
+            "availability_checked_utc": collector.iso_utc(self.now),
+            "unavailable_since_utc": None,
+            "in_selected_period": True,
+        })
+        for field in (
+            "reactions",
+            "external_urls",
+            "canonical_urls",
+            "duplicates",
+            "media",
+            "versions_count",
+            "versions_truncated",
+            "previous_versions",
+            "availability",
+            "availability_checked_utc",
+            "unavailable_since_utc",
+            "in_selected_period",
+        ):
+            self.assertNotIn(field, compact_defaults)
+
+        different = collector.prepare_message_for_ai({
+            "channel_id": 1,
+            "message_id": 2,
+            "text": "Содержательная часть",
+            "raw_text": "Содержательная часть\nПодписаться на канал",
+            "raw_text_available": True,
+        })
+        self.assertEqual(
+            different["raw_text"],
+            "Содержательная часть\nПодписаться на канал",
+        )
+
+    def test_revision_snapshot_captures_source_changes_without_db_noise(self):
+        original = collector.make_message(
+            self.channel,
+            SimpleNamespace(
+                id=777,
+                message="Стабильный текст публикации для проверки истории редакций",
+                date=self.now,
+            ),
+            self.settings,
+        )
+        original["external_urls"] = ["https://example.test/story/old"]
+        original["canonical_urls"] = ["https://example.test/story/old"]
+        original["origin_key"] = "url:https://example.test/story/old"
+        collector.upsert_message(self.connection, original)
+
+        updated = dict(original)
+        updated["external_urls"] = ["https://example.test/story/new"]
+        updated["canonical_urls"] = ["https://example.test/story/new"]
+        updated["origin_key"] = "url:https://example.test/story/new"
+        collector.upsert_message(self.connection, updated)
+        self.connection.commit()
+
+        row = self.connection.execute(
+            "SELECT * FROM messages WHERE channel_id = 1 AND message_id = 777"
+        ).fetchone()
+        message = collector.db_row_to_message(row, None)
+        collector.attach_versions(self.connection, [message], 3)
+
+        self.assertEqual(message["versions_count"], 1)
+        previous = message["previous_versions"][0]
+        self.assertEqual(
+            previous["canonical_urls"],
+            ["https://example.test/story/old"],
+        )
+        self.assertNotIn("content_hash", previous)
+        self.assertNotIn("metrics_hash", previous)
+        self.assertNotIn("reactions_json", previous)
+
+    def test_outside_period_edit_is_marked_as_change_context(self):
+        baseline = collector.iso_utc(self.now - timedelta(hours=1))
+        old_date = collector.iso_utc(self.now - timedelta(days=3))
+        current_date = collector.iso_utc(self.now - timedelta(minutes=10))
+        changed = collector.iso_utc(self.now - timedelta(minutes=5))
+        first_seen = collector.iso_utc(self.now - timedelta(days=3))
+
+        self.connection.execute(
+            """
+            INSERT INTO messages(
+                channel_id, message_id, channel_name, username, date_utc,
+                text, first_seen_utc, content_changed_utc
+            ) VALUES(1, 801, 'Test', 'test', ?, 'Старая публикация', ?, ?)
+            """,
+            (old_date, first_seen, changed),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO messages(
+                channel_id, message_id, channel_name, username, date_utc,
+                text, first_seen_utc
+            ) VALUES(1, 802, 'Test', 'test', ?, 'Текущая публикация', ?)
+            """,
+            (current_date, current_date),
+        )
+        self.connection.commit()
+
+        messages = collector.load_messages_for_export(
+            self.connection,
+            [self.channel],
+            24,
+            baseline,
+            self.settings,
+        )
+        by_id = {message["message_id"]: message for message in messages}
+        self.assertFalse(by_id[801]["in_selected_period"])
+        self.assertEqual(
+            by_id[801]["change_status"],
+            "edited_since_previous_digest",
+        )
+        self.assertTrue(by_id[802]["in_selected_period"])
+
+    def test_digest_export_keeps_outside_period_changes_out_of_main_arrays(self):
+        old_change = {
+            "channel_id": 1,
+            "message_id": 901,
+            "message_key": "1:901",
+            "channel": "Test",
+            "username": "test",
+            "date_utc": collector.iso_utc(self.now - timedelta(days=3)),
+            "date_local": collector.iso_local(self.now - timedelta(days=3)),
+            "text": "Старая публикация получила существенную правку",
+            "raw_text": "Старая публикация получила существенную правку",
+            "raw_text_available": True,
+            "in_selected_period": False,
+            "change_status": "edited_since_previous_digest",
+        }
+        sync_stats = {
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 0,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+        latest, _, _, _ = collector._v4_save_output(
+            [old_change],
+            [],
+            [],
+            0,
+            0,
+            24,
+            [self.channel],
+            sync_stats,
+            collector.iso_utc(self.now - timedelta(hours=1)),
+            "news.db:runs",
+            [],
+            self.settings,
+        )
+        payload = __import__("json").loads(
+            latest.read_text(encoding="utf-8")
+        )
+        self.assertEqual(payload["news_messages"], [])
+        changes = payload["changes_since_previous_digest"]
+        self.assertEqual(changes["outside_period_change_count"], 1)
+        self.assertEqual(
+            changes["outside_period_changes"][0]["message_key"],
+            "1:901",
         )
 
     def test_digest_request_uses_telegram_urls_for_sources(self):
@@ -1325,6 +1651,17 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не достраивай отсутствующие факты", request)
         self.assertIn("автора действия, мотив, цель и причинность", request)
         self.assertIn("перепечатки одного исходного сообщения не считай независимыми подтверждениями", request)
+        self.assertIn("количество публикаций само по себе не делает сюжет важнее", request)
+        for confidence in (
+            "подтверждено",
+            "вероятно",
+            "пока не подтверждено",
+            "спорно",
+            "мнение/оценка",
+        ):
+            self.assertIn(confidence, request)
+        self.assertIn("similar_message_refs", request)
+        self.assertIn("это не доказательство одного события", request)
 
     def test_digest_request_keeps_adaptive_compact_structure(self):
         request = collector.DIGEST_REQUEST
@@ -1343,6 +1680,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не задаёт временные границы основного дайджеста", request)
         self.assertIn("не является фильтром отбора", request)
         self.assertIn("не исключай из основного дайджеста", request)
+        self.assertIn("outside_period_changes", request)
+        self.assertIn("не расширяй ими основной временной интервал", request)
 
     def test_digest_hides_internal_coverage_and_comparison_rules(self):
         request = collector.DIGEST_REQUEST
@@ -1407,8 +1746,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(collector.DIGEST_REQUEST), 6000)
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
-        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 7)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "7.0")
+        self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.0")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -1517,7 +1856,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Текущая версия — 5.4.13 Testing",
+            "Текущая версия — 5.4.14 Testing",
             readme,
         )
         self.assertIn(
@@ -1626,8 +1965,9 @@ class OfflineRegressionTests(unittest.TestCase):
             [], [], [], 0, 0, 6, channels, sync_stats, None, None, [], self.settings
         )
         payload = __import__("json").loads(latest.read_text(encoding="utf-8"))
-        self.assertEqual(payload["meta"]["schema_version"], 7)
-        self.assertEqual(payload["meta"]["digest_profile_version"], "7.0")
+        self.assertEqual(payload["meta"]["schema_version"], 8)
+        self.assertEqual(payload["meta"]["digest_profile_version"], "8.0")
+        self.assertIn("raw_text_representation", payload["meta"])
         self.assertIn("recommended_digest_request", payload["meta"])
         self.assertNotIn("recommended_ai_request", payload["meta"])
         self.assertTrue(archive.name.startswith("ДАЙДЖЕСТ_"))
