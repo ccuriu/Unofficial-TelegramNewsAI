@@ -1077,6 +1077,13 @@ class OfflineRegressionTests(unittest.TestCase):
             self.assertNotIn("change_status", message)
             self.assertIn("previous_versions", message)
 
+    def test_change_summary_counts_unavailable_separately(self):
+        summary = collector.calculate_change_summary([
+            {"change_status": "unavailable_since_previous_digest"}
+        ])
+        self.assertEqual(summary["unavailable_since_previous_digest"], 1)
+        self.assertEqual(summary["existing"], 0)
+
     def test_runs_schema_has_selection_fingerprint(self):
         columns = collector.table_columns(self.connection, "runs")
         self.assertIn("selection_fingerprint", columns)
