@@ -7494,8 +7494,9 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
         }
         direct.append(message)
 
-    # 4) Опциональный смысловой резерв. Он не нужен для нормальной работы 5.4,
-    # но после --setup-semantic помогает с синонимами и перефразировками.
+    # 4) Совместимый остаток старого смыслового резерва.
+    # В 5.4.13 semantic_enabled принудительно False, поэтому Telegram-контент
+    # обрабатывается только локальным FTS5/LIKE-поиском без ML-модели.
     semantic_meta = {
         'enabled': bool(settings.get('semantic_enabled', False)),
         'used': False,
@@ -7539,8 +7540,8 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
         })
     else:
         semantic_meta.update({
-            'reason': 'optional_not_enabled',
-            'hint': 'Базовый поиск работает без модели. Для смыслового резерва запустите программу с --setup-semantic один раз.',
+            'reason': 'disabled_in_current_version',
+            'hint': 'Поиск работает локально через SQLite FTS5/LIKE без ML-модели.',
         })
 
     counts = Counter(m["channel"] for m in direct if m.get("channel"))
