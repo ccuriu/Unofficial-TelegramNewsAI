@@ -84,6 +84,131 @@ jobs:
         run: |
           .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
 
+      - name: Verify clean install from release candidate
+        shell: powershell
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\release" -Directory)
+          if ($packages.Count -ne 1) { throw "Expected exactly one release package directory, found $($packages.Count)." }
+          $package = $packages[0].FullName
+          $installerBat = Join-Path $package 'INSTALL.bat'
+          $command = 'echo.|call "' + $installerBat + '"'
+          & cmd.exe /d /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Clean install through INSTALL.bat failed: $LASTEXITCODE" }
+
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $shortcutPath = Join-Path $desktop 'Unofficial TelegramNewsAI.lnk'
+          if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+            throw 'Clean install did not create the desktop shortcut.'
+          }
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut($shortcutPath)
+          if ($shortcut.TargetPath -ine (Join-Path $package 'Telegram_Digest.exe')) {
+            throw "Shortcut target is wrong: $($shortcut.TargetPath)"
+          }
+          if ($shortcut.WorkingDirectory -ine $package) {
+            throw "Shortcut working directory is wrong: $($shortcut.WorkingDirectory)"
+          }
+          Remove-Item -LiteralPath $shortcutPath -Force
+
+          $venvPython = Join-Path $package '.venv\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            throw 'Clean install did not create .venv.'
+          }
+          & $venvPython -c "import telethon; print('Installed Telethon', telethon.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Telethon import failed.' }
+          & $venvPython -m py_compile (Join-Path $package 'telegram_collector_free.py')
+          if ($LASTEXITCODE -ne 0) { throw 'Installed collector compile-check failed.' }
+
+          $launcher = Join-Path $package 'Telegram_Digest.exe'
+          $process = Start-Process $launcher -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed launcher self-test failed: $($process.ExitCode)" }
+
+          $version = (Select-String -LiteralPath (Join-Path $package 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($version -ne '5.4.17 Testing') { throw "Unexpected installed collector version: $version" }
+          $versionInfo = (Get-Item -LiteralPath $launcher).VersionInfo
+          if ($versionInfo.FileVersion -ne '5.4.17.0') { throw "Unexpected launcher file version: $($versionInfo.FileVersion)" }
+
+          foreach ($relative in @(
+            'credentials.bin',
+            'telegram_session.session',
+            'selected_channels.json',
+            'settings_free.json',
+            'news.db',
+            'logs'
+          )) {
+            if (Test-Path -LiteralPath (Join-Path $package $relative)) {
+              throw "Fresh installation unexpectedly contains user state: $relative"
+            }
+          }
+          $unexpectedDirs = @(Get-ChildItem -LiteralPath $package -Directory -Force |
+            Where-Object { $_.Name -notin @('.venv', '__pycache__') })
+          if ($unexpectedDirs.Count) {
+            throw "Fresh installation created unexpected local directories: $($unexpectedDirs.Name -join ', ')"
+          }
+
+      - name: Verify in-place update with real release candidate
+        shell: powershell
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\release" -Directory)
+          if ($packages.Count -ne 1) { throw "Expected exactly one release package directory, found $($packages.Count)." }
+          $source = $packages[0].FullName
+          $target = Join-Path $env:RUNNER_TEMP 'e2e-installed-previous'
+          if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+          Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
+
+          $collector = Join-Path $target 'telegram_collector_free.py'
+          $collectorText = Get-Content -LiteralPath $collector -Raw -Encoding UTF8
+          $collectorText = $collectorText -replace 'APP_VERSION\s*=\s*"5\.4\.17 Testing"', 'APP_VERSION = "5.4.16 Testing"'
+          [IO.File]::WriteAllText($collector, $collectorText, [Text.UTF8Encoding]::new($false))
+
+          $state = @{
+            'credentials.bin' = 'credential-state'
+            'telegram_session.session' = 'session-state'
+            'telegram_session.session-journal' = 'session-journal-state'
+            'selected_channels.json' = '{"channels":[1,2,3]}'
+            'settings_free.json' = '{"default_hours":24}'
+            'news.db' = 'database-history-state'
+            'news.db-wal' = 'database-wal-state'
+            'news.db-shm' = 'database-shm-state'
+          }
+          foreach ($entry in $state.GetEnumerator()) {
+            [IO.File]::WriteAllText((Join-Path $target $entry.Key), $entry.Value, [Text.UTF8Encoding]::new($false))
+          }
+          $digestDir = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('0JTQsNC50LTQttC10YHRgtGL'))
+          $backupDir = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('0KDQtdC30LXRgNCy0L3Ri9C1X9C60L7Qv9C40Lg='))
+          New-Item -ItemType Directory -Path (Join-Path $target ($digestDir + '\Archive')) -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $target ($digestDir + '\Archive\old.json')), 'old-digest', [Text.UTF8Encoding]::new($false))
+          New-Item -ItemType Directory -Path (Join-Path $target 'logs') -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $target 'logs\old.log'), 'old-log', [Text.UTF8Encoding]::new($false))
+          New-Item -ItemType Directory -Path (Join-Path $target $backupDir) -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $target ($backupDir + '\old.bin')), 'old-backup', [Text.UTF8Encoding]::new($false))
+
+          $before = @{}
+          foreach ($name in $state.Keys) {
+            $before[$name] = (Get-FileHash -LiteralPath (Join-Path $target $name) -Algorithm SHA256).Hash
+          }
+
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'update.ps1') -TargetPath $target
+          if ($LASTEXITCODE -ne 0) { throw "Real release updater integration failed: $LASTEXITCODE" }
+
+          $updatedVersion = (Select-String -LiteralPath $collector -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($updatedVersion -ne '5.4.17 Testing') { throw "Updater did not install 5.4.17 Testing: $updatedVersion" }
+
+          foreach ($name in $state.Keys) {
+            $after = (Get-FileHash -LiteralPath (Join-Path $target $name) -Algorithm SHA256).Hash
+            if ($after -ne $before[$name]) { throw "Updater changed protected state: $name" }
+          }
+          foreach ($relative in @(
+            ($digestDir + '\Archive\old.json'),
+            'logs\old.log',
+            ($backupDir + '\old.bin'),
+            '.venv\Scripts\python.exe'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $target $relative))) {
+              throw "Updater lost preserved installation content: $relative"
+            }
+          }
+
       - name: Verify exact release ZIP contents
         shell: powershell
         run: |

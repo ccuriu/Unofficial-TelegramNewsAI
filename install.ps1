@@ -22,14 +22,24 @@ function Find-Python {
         @{ File = 'py.exe'; Args = @('-3') },
         @{ File = 'python.exe'; Args = @() }
     )
-    $candidates = @()
+    $seen = @{}
+
+    # Fast path: use a supported Python already available from PATH.
     foreach ($candidate in $commands) {
         $command = Get-Command $candidate.File -ErrorAction SilentlyContinue
-        if ($command) {
-            $candidates += @{ File = $command.Source; Args = $candidate.Args }
+        if (-not $command) { continue }
+        $resolved = @{ File = $command.Source; Args = $candidate.Args }
+        $key = $resolved.File + '|' + ($resolved.Args -join ' ')
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        $version = Get-PythonVersion $resolved
+        if ($version -and $version -ge $minimumPython) {
+            $resolved.Version = $version
+            return $resolved
         }
     }
 
+    # Fallback only when PATH did not provide a supported interpreter.
     $roots = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
         (Join-Path $env:ProgramFiles 'Python*')
@@ -39,19 +49,15 @@ function Find-Python {
             Where-Object { $_.FullName -notmatch '\\WindowsApps\\' } |
             Sort-Object FullName -Descending)
         foreach ($item in $found) {
-            $candidates += @{ File = $item.FullName; Args = @() }
-        }
-    }
-
-    $seen = @{}
-    foreach ($candidate in $candidates) {
-        $key = $candidate.File + '|' + ($candidate.Args -join ' ')
-        if ($seen.ContainsKey($key)) { continue }
-        $seen[$key] = $true
-        $version = Get-PythonVersion $candidate
-        if ($version -and $version -ge $minimumPython) {
-            $candidate.Version = $version
-            return $candidate
+            $candidate = @{ File = $item.FullName; Args = @() }
+            $key = $candidate.File + '|'
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+            $version = Get-PythonVersion $candidate
+            if ($version -and $version -ge $minimumPython) {
+                $candidate.Version = $version
+                return $candidate
+            }
         }
     }
     return $null

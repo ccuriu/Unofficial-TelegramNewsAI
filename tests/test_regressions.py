@@ -1955,6 +1955,13 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("Get-PythonVersion", installer)
         self.assertIn("$venvDir.unsupported-", installer)
 
+    def test_installer_checks_path_python_before_recursive_fallback(self):
+        installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        fast = installer.index("# Fast path:")
+        fallback = installer.index("# Fallback only")
+        self.assertLess(fast, fallback)
+        self.assertIn("return $resolved", installer[fast:fallback])
+
     def test_user_facing_branding_is_unofficial(self):
         self.assertEqual(
             collector.APP_DISPLAY_NAME,
