@@ -6,10 +6,9 @@ $ErrorActionPreference = 'Stop'
 
 $source = Join-Path $PSScriptRoot 'Telegram_Digest.cs'
 $iconBuilder = Join-Path $PSScriptRoot 'build_icon.ps1'
-$iconSource = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\icon.png'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
-foreach ($required in @($source, $iconBuilder, $iconSource, $compiler)) {
+foreach ($required in @($source, $iconBuilder, $compiler)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required launcher build file not found: $required"
     }
@@ -29,7 +28,7 @@ $iconPath = Join-Path $env:TEMP (
 )
 
 try {
-    & $iconBuilder -SourcePng $iconSource -OutputPath $iconPath
+    & $iconBuilder -OutputPath $iconPath
 
     if (-not (Test-Path -LiteralPath $iconPath)) {
         throw "Launcher icon was not created: $iconPath"
