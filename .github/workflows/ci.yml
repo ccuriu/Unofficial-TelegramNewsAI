@@ -54,7 +54,7 @@ jobs:
       - name: Validate PowerShell scripts
         shell: powershell
         run: |
-          foreach ($path in @('.\install.ps1', '.\scripts\build_release.ps1', '.\launcher\build_launcher.ps1')) {
+          foreach ($path in @('.\install.ps1', '.\scripts\build_release.ps1', '.\launcher\build_launcher.ps1', '.\launcher\build_icon.ps1')) {
             $text = Get-Content -LiteralPath $path -Raw
             [void][ScriptBlock]::Create($text)
           }
