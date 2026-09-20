@@ -242,9 +242,9 @@ def load_settings():
         "open_html_preview": False,
         "refresh_recent_messages": max(0, min(100, int(result.get("refresh_recent_messages", 50)))),
         "refresh_recent_hours": max(0, float(result.get("refresh_recent_hours", 2))),
-        # На период закрытого тестирования не позволяем настройками
-        # скрыть FloodWait внутри Telethon или автоматически продолжить
-        # сетевую нагрузку после первого серверного ограничения.
+        # Защитные настройки нельзя случайно отключить пользовательским
+        # settings_free.json: FloodWait остаётся видимым приложению, а
+        # нагрузка после первого серверного ограничения не продолжается.
         "max_flood_wait_seconds": 0,
         "telethon_flood_sleep_threshold_seconds": 0,
         "stop_on_any_flood_wait": True,
@@ -350,7 +350,7 @@ def log_error(message):
 
 
 def history_request_wait_seconds(settings):
-    """Консервативная пауза между последовательными запросами истории."""
+    """Умеренная пауза между последовательными запросами истории."""
     try:
         value = float(
             (settings or DEFAULT_SETTINGS).get(
@@ -618,14 +618,15 @@ def load_or_create_credentials():
         )
 
     print("\n=== Первичная настройка Telegram ===")
-    print("\nTelegram предупреждает о дополнительном антиспам-контроле")
-    print("для аккаунтов, использующих неофициальные API-клиенты.")
-    print("Это общее предупреждение платформы и не означает, что")
-    print(f"ограничения относятся именно к {APP_DISPLAY_NAME}.")
-    print("В проведённых тестах проекта ограничений аккаунта и сбоев")
-    print("Telegram-сессии при обычном использовании не наблюдалось.")
-    print("Программа использует консервативный последовательный режим")
-    print("запросов и останавливает сетевой этап при сигналах Telegram.\n")
+    print(
+        "\nПрограмма подключается через неофициальный Telegram API-клиент. "
+        "Telegram может ограничивать такую активность, а универсальные "
+        "безопасные лимиты не публикует."
+    )
+    print(
+        "Запросы выполняются последовательно; при FloodWait или сигнале "
+        "ограничения текущий сетевой этап останавливается.\n"
+    )
 
     while True:
         confirmation = input(
