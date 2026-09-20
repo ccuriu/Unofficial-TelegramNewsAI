@@ -53,7 +53,10 @@
 - [x] Python compile/import зелёные.
 - [x] PowerShell scripts проходят синтаксическую проверку.
 - [x] Launcher собирается из актуального исходника и проходит `--self-test`.
-- [x] Release ZIP содержит только whitelist-файлы и не содержит session/credentials/db/settings/logs.
+- [x] Release ZIP содержит только whitelist-файлы из `release_manifest.json`, включая `UPDATE.bat` и `update.ps1`, и не содержит session/credentials/db/settings/logs/дайджестов.
+- [x] Чистая установка собранного release candidate проверена на Windows через `INSTALL.bat`: создаётся `.venv`, устанавливаются зависимости, launcher проходит `--self-test`, ярлык указывает на правильную рабочую директорию, пользовательские данные заранее не появляются.
+- [x] Обновление реальным текущим release candidate поверх тестовой предыдущей установки проверено на Windows: версия повышается до 5.4.17 Testing, session/credentials/channels/settings/news.db и локальные архивы сохраняются.
+- [ ] На реальной рабочей установке выполнен финальный smoke-цикл `UPDATE.bat → 24-часовой дайджест → тематический поиск` без повторной авторизации и потери локального состояния.
 - [ ] SHA-256 релизного ZIP опубликован вместе со сборкой.
 - [ ] Финальная версия помечена Stable только после завершения испытаний; до этого только Testing.
 
