@@ -1499,6 +1499,295 @@ class OfflineRegressionTests(unittest.TestCase):
         post_url = "https://max.ru/channel_vmax/AZ9FDVpHASw"
         self.assertTrue(collector.is_specific_shared_source_url(post_url))
 
+    def test_continuity_loader_uses_matching_prior_digest_only(self):
+        collector.ensure_dirs()
+        channels = [{"id": 1, "name": "Test", "username": "test"}]
+        fingerprint = collector.selection_fingerprint(channels)
+        reference = collector.utc_now()
+        period_start = reference - timedelta(hours=24)
+
+        prior = {
+            "channel_id": 1,
+            "channel": "Test",
+            "username": "test",
+            "message_id": 10,
+            "date_utc": collector.iso_utc(period_start - timedelta(hours=6)),
+            "text": "Предыстория нужного сюжета",
+        }
+        current_period = {
+            "channel_id": 1,
+            "channel": "Test",
+            "username": "test",
+            "message_id": 20,
+            "date_utc": collector.iso_utc(period_start + timedelta(hours=1)),
+            "text": "Сообщение уже текущего периода",
+        }
+
+        good_payload = {
+            "meta": {
+                "artifact_type": "telegram_news_digest",
+                "created_utc": collector.iso_utc(reference - timedelta(hours=1)),
+                "selection_fingerprint": fingerprint,
+            },
+            "news_messages": [prior, current_period],
+        }
+        wrong_payload = {
+            "meta": {
+                "artifact_type": "telegram_news_digest",
+                "created_utc": collector.iso_utc(reference - timedelta(hours=2)),
+                "selection_fingerprint": "wrong-fingerprint",
+            },
+            "news_messages": [{
+                **prior,
+                "message_id": 30,
+                "text": "Чужой набор каналов",
+            }],
+        }
+
+        collector.LATEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        collector.LATEST_FILE.write_text(
+            __import__("json").dumps(good_payload),
+            encoding="utf-8",
+        )
+        (collector.ARCHIVE_DIR / "ДАЙДЖЕСТ_wrong.json").write_text(
+            __import__("json").dumps(wrong_payload),
+            encoding="utf-8",
+        )
+
+        loaded = collector.load_recent_continuity_messages(
+            channels,
+            period_start,
+            reference_utc=reference,
+        )
+
+        self.assertEqual([item["message_id"] for item in loaded], [10])
+
+    def test_continuity_lexical_followup_uses_bounded_prior_context(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "a",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "date_local": "2026-09-18T11:00:00+03:00",
+            "text": (
+                "Компания Альфастрой объявила переговоры о покупке "
+                "Северного машиностроительного завода"
+            ),
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "a",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "date_local": "2026-09-19T11:00:00+03:00",
+            "text": (
+                "Альфастрой подписала соглашение о покупке "
+                "Северного машиностроительного завода"
+            ),
+        }
+
+        context = collector.build_continuity_context(
+            [current],
+            [prior],
+        )
+
+        self.assertEqual(context["messages_count"], 1)
+        item = context["messages"][0]
+        self.assertEqual(item["context_message"]["message_id"], 10)
+        relation = item["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "candidate")
+        self.assertIn("lexical_candidate", relation["match_reasons"])
+
+    def test_continuity_does_not_link_unrelated_posts_by_one_generic_word(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": "Закрытие завода Восток завершилось эвакуацией оборудования",
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Компания Запад открыла новый завод по выпуску аккумуляторов",
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_specific_source_is_strong_even_with_different_text(self):
+        source_url = "https://example.com/news/story-42"
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": "Первое сообщение о событии",
+            "canonical_urls": [source_url],
+            "origin_key": "url:" + source_url,
+        }
+        current = {
+            "channel_id": 2,
+            "channel": "Канал B",
+            "message_id": 20,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Совершенно другая формулировка продолжения",
+            "canonical_urls": [source_url],
+            "origin_key": "url:" + source_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 1)
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "strong")
+        self.assertTrue(
+            {"same_specific_origin", "same_specific_url"}
+            & set(relation["match_reasons"])
+        )
+
+    def test_continuity_profile_url_does_not_create_context(self):
+        profile_url = "https://max.ru/SolovievLive"
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": "Сообщение об одном происшествии",
+            "canonical_urls": [profile_url],
+            "origin_key": "url:" + profile_url,
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Совершенно другая экономическая новость",
+            "canonical_urls": [profile_url],
+            "origin_key": "url:" + profile_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_context_is_bounded_per_current_message(self):
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 50,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": (
+                "Альфастрой завершила покупку Северного "
+                "машиностроительного завода после переговоров"
+            ),
+        }
+        prior = []
+        for message_id, day, suffix in (
+            (10, "17", "начались переговоры"),
+            (11, "18", "стороны согласовали условия"),
+            (12, "19", "подготовлены документы"),
+        ):
+            prior.append({
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": message_id,
+                "date_utc": f"2026-09-{day}T08:00:00+00:00",
+                "text": (
+                    "Альфастрой Северный машиностроительный завод "
+                    + suffix
+                ),
+            })
+
+        context = collector.build_continuity_context(
+            [current],
+            prior,
+            per_current=2,
+        )
+
+        self.assertEqual(context["messages_count"], 2)
+
+    def test_digest_exports_continuity_context_separately_from_current_period(self):
+        channels = [{"id": 10, "name": "A", "username": "a"}]
+        current = {
+            "channel_id": 10,
+            "channel": "A",
+            "username": "a",
+            "message_id": 20,
+            "date_utc": collector.iso_utc(self.now),
+            "date_local": collector.iso_local(self.now),
+            "text": (
+                "Альфастрой подписала соглашение о покупке "
+                "Северного машиностроительного завода"
+            ),
+            "change_status": "new_since_previous_digest",
+        }
+        prior = {
+            "channel_id": 10,
+            "channel": "A",
+            "username": "a",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "date_local": "2026-09-18T11:00:00+03:00",
+            "text": (
+                "Альфастрой объявила переговоры о покупке "
+                "Северного машиностроительного завода"
+            ),
+        }
+        sync_stats = {
+            "new_messages_saved": 1,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 1,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+
+        with patch.object(
+            collector,
+            "load_recent_continuity_messages",
+            return_value=[prior],
+        ):
+            latest, _, _, _ = collector._v4_save_output(
+                [current],
+                [current],
+                [],
+                0,
+                0,
+                24,
+                channels,
+                sync_stats,
+                "2026-09-18T12:00:00+00:00",
+                "archive:test.json",
+                [],
+                self.settings,
+            )
+
+        payload = __import__("json").loads(
+            latest.read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(payload["news_messages"]), 1)
+        self.assertEqual(payload["news_messages"][0]["message_id"], 20)
+        self.assertEqual(
+            payload["continuity_context"]["messages_count"],
+            1,
+        )
+        self.assertEqual(
+            payload["continuity_context"]["messages"][0]
+            ["context_message"]["message_id"],
+            10,
+        )
+        self.assertEqual(
+            payload["meta"]["continuity_context_messages"],
+            1,
+        )
+
     def test_related_group_member_keeps_telegram_url(self):
         common_url = "https://example.test/source"
         messages = [
@@ -1818,6 +2107,9 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не исключай из основного дайджеста", request)
         self.assertIn("outside_period_changes", request)
         self.assertIn("не расширяй ими основной временной интервал", request)
+        self.assertIn("continuity_context", request)
+        self.assertIn("lexical_candidate не доказательство", request)
+        self.assertIn("context_message не выдавай за текущую новость", request)
 
     def test_digest_hides_internal_coverage_and_comparison_rules(self):
         request = collector.DIGEST_REQUEST
@@ -1883,7 +2175,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.0")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.1")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -1999,7 +2291,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Текущая версия — 5.4.17 Testing",
+            "Текущая версия — 5.5.0 Testing",
             readme,
         )
         self.assertIn(

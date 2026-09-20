@@ -124,9 +124,9 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Installed launcher self-test failed: $($process.ExitCode)" }
 
           $version = (Select-String -LiteralPath (Join-Path $package 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          if ($version -ne '5.4.17 Testing') { throw "Unexpected installed collector version: $version" }
+          if ($version -ne '5.5.0 Testing') { throw "Unexpected installed collector version: $version" }
           $versionInfo = (Get-Item -LiteralPath $launcher).VersionInfo
-          if ($versionInfo.FileVersion -ne '5.4.17.0') { throw "Unexpected launcher file version: $($versionInfo.FileVersion)" }
+          if ($versionInfo.FileVersion -ne '5.5.0.0') { throw "Unexpected launcher file version: $($versionInfo.FileVersion)" }
 
           foreach ($relative in @(
             'credentials.bin',
@@ -158,7 +158,7 @@ jobs:
 
           $collector = Join-Path $target 'telegram_collector_free.py'
           $collectorText = Get-Content -LiteralPath $collector -Raw -Encoding UTF8
-          $collectorText = $collectorText -replace 'APP_VERSION\s*=\s*"5\.4\.17 Testing"', 'APP_VERSION = "5.4.16 Testing"'
+          $collectorText = $collectorText -replace 'APP_VERSION\s*=\s*"5\.5\.0 Testing"', 'APP_VERSION = "5.4.17 Testing"'
           [IO.File]::WriteAllText($collector, $collectorText, [Text.UTF8Encoding]::new($false))
 
           $state = @{
@@ -192,7 +192,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Real release updater integration failed: $LASTEXITCODE" }
 
           $updatedVersion = (Select-String -LiteralPath $collector -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          if ($updatedVersion -ne '5.4.17 Testing') { throw "Updater did not install 5.4.17 Testing: $updatedVersion" }
+          if ($updatedVersion -ne '5.5.0 Testing') { throw "Updater did not install 5.5.0 Testing: $updatedVersion" }
 
           foreach ($name in $state.Keys) {
             $after = (Get-FileHash -LiteralPath (Join-Path $target $name) -Algorithm SHA256).Hash
