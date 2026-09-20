@@ -2045,8 +2045,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("outside_period_changes", request)
         self.assertIn("не расширяй ими основной временной интервал", request)
         self.assertIn("continuity_context", request)
-        self.assertIn("lexical_candidate не является доказательством", request)
-        self.assertIn("не выдавай за событие текущего периода", request)
+        self.assertIn("lexical_candidate не доказательство", request)
+        self.assertIn("context_message не выдавай за текущую новость", request)
 
     def test_digest_hides_internal_coverage_and_comparison_rules(self):
         request = collector.DIGEST_REQUEST
