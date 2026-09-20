@@ -39,14 +39,14 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.17 Testing"
+APP_VERSION = "5.5.0 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.0"
+DIGEST_PROFILE_VERSION = "8.1"
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -63,6 +63,14 @@ LOG_DIR = APP_DIR / "logs"
 LATEST_FILE = OUTPUT_DIR / "ДАЙДЖЕСТ_ПОСЛЕДНИЙ.json"
 SEARCH_LATEST_FILE = OUTPUT_DIR / "ПОИСК_ПОСЛЕДНИЙ.json"
 SEARCH_ARCHIVE_DIR = ARCHIVE_DIR / "Поиск"
+
+# Короткая локальная предыстория для продолжающихся сюжетов.
+# Используются только уже сохранённые сопоставимые дайджесты:
+# никаких дополнительных Telegram-запросов и фоновой обработки.
+CONTINUITY_LOOKBACK_DAYS = 3
+CONTINUITY_MAX_MESSAGES = 40
+CONTINUITY_PER_CURRENT_MESSAGE = 2
+CONTINUITY_SOURCE_DIGESTS = 3
 
 
 # ============================================================
@@ -4499,6 +4507,453 @@ def build_related_groups(messages):
 
 
 
+def _continuity_message_tokens(message):
+    """
+    Небольшой набор содержательных лексем для консервативного
+    сопоставления текущего сообщения с недавней предысторией.
+
+    URL удаляются заранее: постоянная профильная/рекламная ссылка не должна
+    становиться лексическим признаком одного сюжета.
+    """
+    text = re.sub(
+        r"https?://\\S+",
+        " ",
+        str(message.get("text") or ""),
+        flags=re.IGNORECASE,
+    )
+    tokens = re.findall(
+        r"[^\\W_]+(?:['’-][^\\W_]+)*",
+        unicodedata.normalize("NFKC", text).casefold(),
+        flags=re.UNICODE,
+    )
+    result = set()
+    for token in tokens:
+        if len(token) < 5 or token.isdigit():
+            continue
+        # search_stem_prefix определён ниже в модуле; к моменту выполнения
+        # дайджеста модуль уже полностью загружен.
+        stem = search_stem_prefix(token)
+        if len(stem) >= 5:
+            result.add(stem)
+    return result
+
+
+def _continuity_specific_origin(message):
+    origin = message.get("origin_key")
+    if not isinstance(origin, str) or not origin:
+        return None
+    if origin.startswith("url:") and not is_specific_shared_source_url(
+        origin[4:]
+    ):
+        return None
+    return origin
+
+
+def _continuity_specific_urls(message):
+    return {
+        url
+        for url in message.get("canonical_urls", []) or []
+        if is_specific_shared_source_url(url)
+    }
+
+
+def load_recent_continuity_messages(
+    channels,
+    period_start_utc,
+    reference_utc=None,
+    lookback_days=CONTINUITY_LOOKBACK_DAYS,
+    source_digest_limit=CONTINUITY_SOURCE_DIGESTS,
+):
+    """
+    Загружает только сообщения ДО текущего периода из нескольких последних
+    JSON-дайджестов с тем же точным набором каналов.
+
+    Архив используется как bounded cache: это быстрее и безопаснее, чем
+    повторно обходить всю SQLite-историю или делать дополнительные Telegram
+    запросы. Перекрывающиеся архивы дедуплицируются по message_key.
+    """
+    fingerprint = selection_fingerprint(channels)
+
+    def normalize_dt(value):
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = parse_dt(value)
+        if not dt:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    period_start = normalize_dt(period_start_utc)
+    upper = normalize_dt(reference_utc) or utc_now()
+    upper = upper.astimezone(timezone.utc)
+    cutoff = upper - timedelta(days=max(1, int(lookback_days)))
+    if period_start is None:
+        period_start = upper
+
+    candidates = []
+    if LATEST_FILE.exists():
+        candidates.append(LATEST_FILE)
+    if ARCHIVE_DIR.exists():
+        try:
+            candidates.extend(
+                sorted(
+                    ARCHIVE_DIR.glob("*.json"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+            )
+        except Exception:
+            pass
+
+    seen_paths = set()
+    seen_digest_times = set()
+    seen_messages = set()
+    result = []
+
+    for path in candidates:
+        try:
+            path_key = str(Path(path).resolve())
+        except Exception:
+            path_key = str(path)
+        if path_key in seen_paths:
+            continue
+        seen_paths.add(path_key)
+
+        try:
+            payload = json.loads(
+                Path(path).read_text(encoding="utf-8")
+            )
+        except Exception:
+            continue
+
+        meta = payload.get("meta") or {}
+        if meta.get("artifact_type") not in (None, "telegram_news_digest"):
+            continue
+        if meta.get("selection_fingerprint") != fingerprint:
+            continue
+
+        created = normalize_dt(
+            meta.get("created_utc") or meta.get("created_local")
+        )
+        if not created or created < cutoff or created > upper + timedelta(minutes=5):
+            continue
+
+        created_key = iso_utc(created)
+        if created_key in seen_digest_times:
+            continue
+        seen_digest_times.add(created_key)
+
+        for message in payload.get("news_messages") or []:
+            if not isinstance(message, dict):
+                continue
+            message_dt = normalize_dt(
+                message.get("date_utc") or message.get("date_local")
+            )
+            if (
+                not message_dt
+                or message_dt >= period_start
+                or message_dt < cutoff
+            ):
+                continue
+            key = (
+                message.get("message_key")
+                or message_key(message)
+            )
+            if key in seen_messages:
+                continue
+            seen_messages.add(key)
+            result.append(copy.deepcopy(message))
+
+        if len(seen_digest_times) >= max(1, int(source_digest_limit)):
+            break
+
+    result.sort(
+        key=lambda message: (
+            message.get("date_utc")
+            or message.get("date_local")
+            or ""
+        ),
+        reverse=True,
+    )
+    return result
+
+
+def build_continuity_context(
+    current_messages,
+    prior_messages,
+    *,
+    lookback_days=CONTINUITY_LOOKBACK_DAYS,
+    max_messages=CONTINUITY_MAX_MESSAGES,
+    per_current=CONTINUITY_PER_CURRENT_MESSAGE,
+):
+    """
+    Строит ограниченный контекст предыстории.
+
+    Сильные связи: reply, тот же конкретный origin или canonical URL.
+    Лексическая связь намеренно консервативна: нужны несколько редких общих
+    лексем; для другого канала порог выше. Это только candidate hint для ИИ,
+    а не утверждение, что публикации описывают одно событие.
+    """
+    current = [
+        message
+        for message in current_messages
+        if isinstance(message, dict)
+        and (message.get("text") or "").strip()
+    ]
+    prior = [
+        message
+        for message in prior_messages
+        if isinstance(message, dict)
+        and (message.get("text") or "").strip()
+    ]
+
+    empty = {
+        "lookback_days": int(lookback_days),
+        "messages_count": 0,
+        "messages": [],
+        "note": (
+            "Предыстория вне выбранного периода. Используй её только для "
+            "понимания текущего развития; lexical_candidate — лишь подсказка, "
+            "а не доказательство одного события."
+        ),
+    }
+    if not current or not prior:
+        return empty
+
+    prior_by_key = {}
+    prior_tokens = {}
+    token_docs = {}
+    origin_index = {}
+    url_index = {}
+    direct_index = {}
+
+    for message in prior:
+        key = message.get("message_key") or message_key(message)
+        prior_by_key[key] = message
+        direct_index[(
+            int(message.get("channel_id") or 0),
+            int(message.get("message_id") or 0),
+        )] = key
+
+        origin = _continuity_specific_origin(message)
+        if origin:
+            origin_index.setdefault(origin, set()).add(key)
+
+        for url in _continuity_specific_urls(message):
+            url_index.setdefault(url, set()).add(key)
+
+        tokens = _continuity_message_tokens(message)
+        prior_tokens[key] = tokens
+        for token in tokens:
+            token_docs.setdefault(token, set()).add(key)
+
+    document_count = max(1, len(prior_by_key))
+    rare_limit = max(2, int(math.ceil(document_count * 0.03)))
+    common_limit = max(8, int(math.ceil(document_count * 0.12)))
+
+    linked = {}
+
+    def add_link(prior_key, current_message, reasons, strength, score):
+        record = linked.setdefault(
+            prior_key,
+            {
+                "message": prior_by_key[prior_key],
+                "links": {},
+                "best_strength": 0,
+                "best_score": 0.0,
+            },
+        )
+        current_key = (
+            current_message.get("message_key")
+            or message_key(current_message)
+        )
+        link = record["links"].setdefault(
+            current_key,
+            {
+                "message_ref": make_compact_message_ref(current_message),
+                "match_reasons": set(),
+                "match_strength": strength,
+                "score": float(score),
+            },
+        )
+        link["match_reasons"].update(reasons)
+        if strength > link["match_strength"]:
+            link["match_strength"] = strength
+        link["score"] = max(link["score"], float(score))
+        record["best_strength"] = max(record["best_strength"], strength)
+        record["best_score"] = max(record["best_score"], float(score))
+
+    for current_message in current:
+        current_key = (
+            current_message.get("message_key")
+            or message_key(current_message)
+        )
+        candidates = {}
+
+        def mark(prior_key, reason, strength=2, score=100.0):
+            if not prior_key or prior_key == current_key:
+                return
+            if prior_key not in prior_by_key:
+                return
+            item = candidates.setdefault(
+                prior_key,
+                {
+                    "reasons": set(),
+                    "strength": 0,
+                    "score": 0.0,
+                },
+            )
+            item["reasons"].add(reason)
+            item["strength"] = max(item["strength"], strength)
+            item["score"] = max(item["score"], float(score))
+
+        reply_to = current_message.get("reply_to_message_id")
+        if reply_to is not None:
+            mark(
+                direct_index.get((
+                    int(current_message.get("channel_id") or 0),
+                    int(reply_to),
+                )),
+                "reply_to_previous_message",
+            )
+
+        origin = _continuity_specific_origin(current_message)
+        if origin:
+            for prior_key in origin_index.get(origin, set()):
+                mark(prior_key, "same_specific_origin")
+
+        for url in _continuity_specific_urls(current_message):
+            for prior_key in url_index.get(url, set()):
+                mark(prior_key, "same_specific_url")
+
+        current_tokens = _continuity_message_tokens(current_message)
+        candidate_counts = Counter()
+        for token in current_tokens:
+            docs = token_docs.get(token)
+            if not docs or len(docs) > common_limit:
+                continue
+            for prior_key in docs:
+                candidate_counts[prior_key] += 1
+
+        for prior_key, shared_count in candidate_counts.items():
+            if prior_key == current_key or shared_count < 2:
+                continue
+
+            previous = prior_by_key[prior_key]
+            previous_set = prior_tokens.get(prior_key, set())
+            shared = current_tokens & previous_set
+            if len(shared) < 2:
+                continue
+            if not any(
+                len(token_docs.get(token, ())) <= rare_limit
+                for token in shared
+            ):
+                continue
+
+            same_channel = (
+                int(current_message.get("channel_id") or 0)
+                == int(previous.get("channel_id") or 0)
+            )
+            if not same_channel and len(shared) < 3:
+                continue
+
+            overlap = len(shared) / max(
+                1,
+                min(len(current_tokens), len(previous_set)),
+            )
+            minimum_overlap = 0.24 if same_channel else 0.30
+            if overlap < minimum_overlap:
+                continue
+
+            idf_score = sum(
+                math.log(
+                    (document_count + 1)
+                    / (len(token_docs.get(token, ())) + 1)
+                ) + 1.0
+                for token in shared
+            )
+            lexical_score_value = (
+                idf_score
+                + len(shared) * 0.5
+                + overlap * 4.0
+            )
+            if lexical_score_value < 5.0:
+                continue
+
+            mark(
+                prior_key,
+                "lexical_candidate",
+                strength=1,
+                score=lexical_score_value,
+            )
+
+        ordered = sorted(
+            candidates.items(),
+            key=lambda item: (
+                item[1]["strength"],
+                item[1]["score"],
+                prior_by_key[item[0]].get("date_utc")
+                or prior_by_key[item[0]].get("date_local")
+                or "",
+            ),
+            reverse=True,
+        )
+        for prior_key, info in ordered[:max(1, int(per_current))]:
+            add_link(
+                prior_key,
+                current_message,
+                info["reasons"],
+                info["strength"],
+                info["score"],
+            )
+
+    ordered_context = sorted(
+        linked.items(),
+        key=lambda item: (
+            item[1]["best_strength"],
+            item[1]["best_score"],
+            item[1]["message"].get("date_utc")
+            or item[1]["message"].get("date_local")
+            or "",
+        ),
+        reverse=True,
+    )[:max(0, int(max_messages))]
+
+    exported = []
+    for _, record in ordered_context:
+        context_message = prepare_message_for_ai(
+            copy.deepcopy(record["message"])
+        )
+        # Старый change_status/related_group_id относится к прежнему выпуску
+        # и не должен выглядеть как статус текущего периода.
+        context_message.pop("change_status", None)
+        context_message.pop("related_group_id", None)
+
+        links = []
+        for item in record["links"].values():
+            links.append({
+                "message_ref": item["message_ref"],
+                "match_reasons": sorted(item["match_reasons"]),
+                "match_strength": (
+                    "strong"
+                    if item["match_strength"] >= 2
+                    else "candidate"
+                ),
+            })
+
+        exported.append({
+            "context_message": context_message,
+            "related_current_message_refs": links,
+        })
+
+    result = dict(empty)
+    result["messages_count"] = len(exported)
+    result["messages"] = exported
+    return result
+
+
 def split_operational(
     messages,
     settings,
@@ -4567,7 +5022,10 @@ SOURCE_RULES = (
 DIGEST_REQUEST = (
     "Подготовь итоговый редакторский дайджест за выбранный период. У точных повторов inherited_fields восстанавливай из "
     "родительской публикации по inherits_from_message_key. Основной дайджест всегда строй по всему содержательному материалу "
-    "news_messages и operational_messages выбранного периода. changes_since_previous_digest — только дополнительный слой сравнения: "
+    "news_messages и operational_messages выбранного периода. continuity_context содержит только старую предысторию для текущих "
+    "сообщений: используй её, лишь когда связь подтверждается содержанием; lexical_candidate — это подсказка, а не доказательство. "
+    "Не представляй context_message как событие текущего периода и не повторяй старый сюжет, если сегодня нет развития. "
+    "changes_since_previous_digest — только дополнительный слой сравнения: "
     "он не задаёт временные границы основного дайджеста, не заменяет его и не является фильтром отбора. "
     "changes_since_previous_digest.outside_period_changes содержит публикации вне выбранного периода, которые после предыдущего "
     "выпуска были впервые обнаружены, содержательно изменились или стали недоступны; учитывай их только для развития сюжета или "
@@ -4855,6 +5313,24 @@ def _v4_save_output(
             "unavailable_since_previous_digest",
         }
     ]
+
+    period_start_utc = (
+        now.astimezone(timezone.utc)
+        - timedelta(hours=max(1.0, float(hours)))
+    )
+    continuity_prior_messages = (
+        load_recent_continuity_messages(
+            channels,
+            period_start_utc,
+            reference_utc=now,
+        )
+        if previous_run_utc
+        else []
+    )
+    continuity_context = build_continuity_context(
+        news_messages,
+        continuity_prior_messages,
+    )
     changes_block["outside_period_changes"] = [
         prepare_message_for_ai(message)
         for message in outside_period_changes
@@ -5010,6 +5486,9 @@ def _v4_save_output(
             "related_groups_count": len(
                 related_groups
             ),
+            "continuity_context_messages": (
+                continuity_context["messages_count"]
+            ),
 
             "change_summary": (
                 change_summary
@@ -5063,6 +5542,10 @@ def _v4_save_output(
 
         "changes_since_previous_digest": (
             changes_block
+        ),
+
+        "continuity_context": (
+            continuity_context
         ),
 
         "related_message_groups": (
