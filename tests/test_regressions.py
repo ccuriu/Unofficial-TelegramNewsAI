@@ -167,6 +167,160 @@ class OfflineRegressionTests(unittest.TestCase):
         for _, kwargs in client.calls:
             self.assertEqual(kwargs.get("wait_time"), expected)
 
+    def test_sync_channel_with_retries_does_not_retry_flood_wait(self):
+        class SyntheticFloodWaitError(Exception):
+            def __init__(self, seconds):
+                super().__init__(f"FloodWait {seconds}")
+                self.seconds = seconds
+
+        client = SimpleNamespace(
+            is_connected=Mock(return_value=True),
+            connect=AsyncMock(),
+        )
+        error = SyntheticFloodWaitError(120)
+
+        with patch.object(
+            collector,
+            "FloodWaitError",
+            SyntheticFloodWaitError,
+        ):
+            with patch.object(
+                collector,
+                "sync_channel_once",
+                AsyncMock(side_effect=error),
+            ) as mocked_sync:
+                with patch.object(
+                    collector.asyncio,
+                    "sleep",
+                    AsyncMock(),
+                ) as mocked_sleep:
+                    result = asyncio.run(
+                        collector.sync_channel_with_retries(
+                            client,
+                            self.connection,
+                            self.channel,
+                            24,
+                            self.settings,
+                        )
+                    )
+
+        self.assertEqual(mocked_sync.await_count, 1)
+        mocked_sleep.assert_not_awaited()
+        self.assertTrue(result["halt_sync"])
+        self.assertEqual(result["halt_reason"], "flood_wait")
+        self.assertIn("FloodWait 120 сек.", result["error"])
+
+    def test_sync_channel_with_retries_does_not_retry_restriction_errors(self):
+        client = SimpleNamespace(
+            is_connected=Mock(return_value=True),
+            connect=AsyncMock(),
+        )
+        SessionRevokedError = type(
+            "SessionRevokedError",
+            (Exception,),
+            {},
+        )
+
+        for label, error in (
+            ("peer_flood", RuntimeError("PEER_FLOOD")),
+            ("session_revoked", SessionRevokedError("revoked")),
+        ):
+            with self.subTest(signal=label):
+                with patch.object(
+                    collector,
+                    "sync_channel_once",
+                    AsyncMock(side_effect=error),
+                ) as mocked_sync:
+                    with patch.object(
+                        collector.asyncio,
+                        "sleep",
+                        AsyncMock(),
+                    ) as mocked_sleep:
+                        result = asyncio.run(
+                            collector.sync_channel_with_retries(
+                                client,
+                                self.connection,
+                                self.channel,
+                                24,
+                                self.settings,
+                            )
+                        )
+
+                self.assertEqual(mocked_sync.await_count, 1)
+                mocked_sleep.assert_not_awaited()
+                self.assertTrue(result["halt_sync"])
+                self.assertEqual(
+                    result["halt_reason"],
+                    "account_or_api_restriction",
+                )
+
+    def test_backfill_does_not_retry_flood_wait(self):
+        class SyntheticFloodWaitError(Exception):
+            def __init__(self, seconds):
+                super().__init__(f"FloodWait {seconds}")
+                self.seconds = seconds
+
+        error = SyntheticFloodWaitError(90)
+
+        with patch.object(
+            collector,
+            "FloodWaitError",
+            SyntheticFloodWaitError,
+        ):
+            with patch.object(
+                collector,
+                "backfill_channel_history_once",
+                AsyncMock(side_effect=error),
+            ) as mocked_backfill:
+                with patch.object(
+                    collector.asyncio,
+                    "sleep",
+                    AsyncMock(),
+                ) as mocked_sleep:
+                    result = asyncio.run(
+                        collector.backfill_channel_history_with_retries(
+                            object(),
+                            self.connection,
+                            self.channel,
+                            self.now - timedelta(days=30),
+                            self.settings,
+                        )
+                    )
+
+        self.assertEqual(mocked_backfill.await_count, 1)
+        mocked_sleep.assert_not_awaited()
+        self.assertTrue(result["halt_sync"])
+        self.assertEqual(result["halt_reason"], "flood_wait")
+
+    def test_backfill_does_not_retry_peer_flood(self):
+        with patch.object(
+            collector,
+            "backfill_channel_history_once",
+            AsyncMock(side_effect=RuntimeError("PEER_FLOOD")),
+        ) as mocked_backfill:
+            with patch.object(
+                collector.asyncio,
+                "sleep",
+                AsyncMock(),
+            ) as mocked_sleep:
+                result = asyncio.run(
+                    collector.backfill_channel_history_with_retries(
+                        object(),
+                        self.connection,
+                        self.channel,
+                        self.now - timedelta(days=30),
+                        self.settings,
+                    )
+                )
+
+        self.assertEqual(mocked_backfill.await_count, 1)
+        mocked_sleep.assert_not_awaited()
+        self.assertTrue(result["halt_sync"])
+        self.assertEqual(
+            result["halt_reason"],
+            "account_or_api_restriction",
+        )
+
     def test_sync_all_channels_stops_after_unhandled_flood_wait(self):
         channels = [
             dict(self.channel),
@@ -597,6 +751,57 @@ class OfflineRegressionTests(unittest.TestCase):
                         self.settings,
                     )
                 )
+        finally:
+            collector.CRED_FILE = original_cred
+            collector.SESSION_FILE = original_session
+
+    def test_established_install_does_not_auto_reauthorize_unauthorized_session(self):
+        original_cred = collector.CRED_FILE
+        original_session = collector.SESSION_FILE
+        try:
+            collector.CRED_FILE = self.directory / "credentials.bin"
+            collector.CRED_FILE.write_bytes(b"existing")
+            collector.SESSION_FILE = str(
+                self.directory / "telegram_session"
+            )
+            Path(collector.SESSION_FILE + ".session").write_bytes(
+                b"existing-session"
+            )
+
+            candidate = SimpleNamespace(
+                connect=AsyncMock(),
+                is_user_authorized=AsyncMock(return_value=False),
+                disconnect=AsyncMock(),
+                start=AsyncMock(),
+            )
+
+            with patch.object(
+                collector,
+                "TelegramClient",
+                return_value=candidate,
+            ) as mocked_client:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "больше не авторизована",
+                ):
+                    asyncio.run(
+                        collector.ensure_telegram_client(
+                            None,
+                            {
+                                "api_id": 1,
+                                "api_hash": "a" * 32,
+                                "phone": "+10000000000",
+                            },
+                            self.settings,
+                        )
+                    )
+
+            candidate.start.assert_not_awaited()
+            self.assertGreaterEqual(candidate.disconnect.await_count, 1)
+            self.assertEqual(
+                mocked_client.call_args.kwargs["flood_sleep_threshold"],
+                0,
+            )
         finally:
             collector.CRED_FILE = original_cred
             collector.SESSION_FILE = original_session
