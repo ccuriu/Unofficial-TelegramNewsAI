@@ -1182,8 +1182,8 @@ class OfflineRegressionTests(unittest.TestCase):
             ROOT / "launcher" / "build_launcher.ps1"
         ).read_text(encoding="utf-8")
         self.assertIn("/win32icon:", build_launcher)
-        self.assertIn("assets\\icon.png", build_launcher)
-        self.assertTrue((ROOT / "assets" / "icon.png").exists())
+        self.assertNotIn("assets\\icon.png", build_launcher)
+        self.assertTrue((ROOT / "assets" / "icon.svg").exists())
         self.assertTrue((ROOT / "launcher" / "build_icon.ps1").exists())
 
     def test_custom_icon_builder_outputs_multisize_ico_contract(self):
@@ -1197,7 +1197,21 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_readme_displays_project_icon(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn('src="assets/icon.png"', readme)
+        self.assertIn('src="assets/icon.svg"', readme)
+        self.assertIn('width="220"', readme)
+
+    def test_readme_testing_status_is_calm_and_public_release_focused(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "Репозиторий временно остаётся приватным до завершения полного цикла тестирования",
+            readme,
+        )
+        self.assertIn(
+            "Это общее предупреждение платформы и само по себе не означает",
+            readme,
+        )
+        self.assertNotIn("личное использование и стабильность", readme)
+        self.assertNotIn("Если потеря доступа к конкретному аккаунту", readme)
 
     def test_release_builder_uses_exact_maintenance_distribution(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
