@@ -4846,26 +4846,29 @@ def build_continuity_context(
             shared = current_tokens & previous_set
             if len(shared) < 2:
                 continue
-            if not any(
-                len(token_docs.get(token, ())) <= rare_limit
+            rare_shared = sum(
+                1
                 for token in shared
-            ):
-                continue
+                if len(token_docs.get(token, ())) <= rare_limit
+            )
 
             same_channel = (
                 int(current_message.get("channel_id") or 0)
                 == int(previous.get("channel_id") or 0)
             )
-            if not same_channel and len(shared) < 3:
-                continue
+            if same_channel:
+                if len(shared) < 2 or rare_shared < 1:
+                    continue
+            else:
+                # Между разными каналами лексический сигнал строже:
+                # минимум три общие содержательные лексемы, из них две редкие.
+                if len(shared) < 3 or rare_shared < 2:
+                    continue
 
             overlap = len(shared) / max(
                 1,
                 min(len(current_tokens), len(previous_set)),
             )
-            minimum_overlap = 0.24 if same_channel else 0.30
-            if overlap < minimum_overlap:
-                continue
 
             idf_score = sum(
                 math.log(
