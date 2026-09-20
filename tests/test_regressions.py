@@ -1181,7 +1181,23 @@ class OfflineRegressionTests(unittest.TestCase):
         build_launcher = (
             ROOT / "launcher" / "build_launcher.ps1"
         ).read_text(encoding="utf-8")
-        self.assertNotIn("/win32icon:", build_launcher)
+        self.assertIn("/win32icon:", build_launcher)
+        self.assertIn("assets\\icon.png", build_launcher)
+        self.assertTrue((ROOT / "assets" / "icon.png").exists())
+        self.assertTrue((ROOT / "launcher" / "build_icon.ps1").exists())
+
+    def test_custom_icon_builder_outputs_multisize_ico_contract(self):
+        builder = (
+            ROOT / "launcher" / "build_icon.ps1"
+        ).read_text(encoding="utf-8")
+        for size in ("16", "24", "32", "48", "64", "128", "256"):
+            self.assertIn(size, builder)
+        self.assertIn("System.Drawing", builder)
+        self.assertIn("BinaryWriter", builder)
+
+    def test_readme_displays_project_icon(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn('src="assets/icon.png"', readme)
 
     def test_release_builder_uses_exact_maintenance_distribution(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8")
