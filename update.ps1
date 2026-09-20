@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Position = 0)]
     [string]$TargetPath,
     [switch]$AllowDowngrade
