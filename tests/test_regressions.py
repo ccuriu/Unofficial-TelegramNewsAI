@@ -1514,14 +1514,22 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn('src="assets/icon.svg"', readme)
         self.assertIn('width="220"', readme)
 
-    def test_readme_testing_status_is_calm_and_public_release_focused(self):
+    def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "Репозиторий временно остаётся приватным до завершения полного цикла тестирования",
+            "Текущая версия — 5.4.13 Testing",
             readme,
         )
         self.assertIn(
-            "Это общее предупреждение платформы и само по себе не означает",
+            "реальные испытания Telegram API продолжаются параллельно",
+            readme,
+        )
+        self.assertIn(
+            "не что основная функция проекта приостановлена",
+            readme,
+        )
+        self.assertIn(
+            "точные критерии и лимиты не раскрываются",
             readme,
         )
         self.assertNotIn("личное использование и стабильность", readme)
