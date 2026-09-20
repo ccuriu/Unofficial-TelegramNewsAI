@@ -39,7 +39,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.4.12 Testing"
+APP_VERSION = "5.4.13 Testing"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
@@ -151,13 +151,13 @@ DEFAULT_SETTINGS = {
     "telethon_flood_sleep_threshold_seconds": 0,
     "stop_on_any_flood_wait": True,
 
-    # Консервативный профиль Telegram API на период тестирования.
-    # wait_time задаёт паузу между последовательными GetHistoryRequest
-    # внутри iter_messages; межканальная пауза сглаживает пики запросов.
-    "history_request_wait_seconds": 1.0,
-    "inter_channel_delay_seconds": 0.75,
-    "bulk_channel_threshold": 50,
-    "bulk_inter_channel_delay_seconds": 1.5,
+    # Умеренный последовательный профиль для обычного личного сценария.
+    # wait_time сглаживает серии GetHistoryRequest внутри больших историй;
+    # короткая межканальная пауза не превращает 30–50 каналов в долгий запуск.
+    "history_request_wait_seconds": 0.5,
+    "inter_channel_delay_seconds": 0.25,
+    "bulk_channel_threshold": 100,
+    "bulk_inter_channel_delay_seconds": 0.5,
     "flood_wait_safety_seconds": 5,
 
     "open_output_folder": True,
@@ -218,6 +218,22 @@ def load_settings():
     result = DEFAULT_SETTINGS.copy()
     result.update(data)
 
+    # Однократно смягчаем только точный старый Testing-профиль 5.4.12.
+    # Если пользователь менял хотя бы один из этих параметров вручную,
+    # его настройки не трогаем.
+    if (
+        result.get("history_request_wait_seconds") == 1.0
+        and result.get("inter_channel_delay_seconds") == 0.75
+        and result.get("bulk_channel_threshold") == 50
+        and result.get("bulk_inter_channel_delay_seconds") == 1.5
+    ):
+        result.update({
+            "history_request_wait_seconds": 0.5,
+            "inter_channel_delay_seconds": 0.25,
+            "bulk_channel_threshold": 100,
+            "bulk_inter_channel_delay_seconds": 0.5,
+        })
+
     # Эти ограничения не дают обычному поиску повторно сканировать Telegram
     # и загружать тяжёлую нейронную модель без явной необходимости.
     result.update({
@@ -236,28 +252,28 @@ def load_settings():
             0.5,
             min(
                 5.0,
-                float(result.get("history_request_wait_seconds", 1.0)),
+                float(result.get("history_request_wait_seconds", 0.5)),
             ),
         ),
         "inter_channel_delay_seconds": max(
             0.0,
             min(
                 10.0,
-                float(result.get("inter_channel_delay_seconds", 0.75)),
+                float(result.get("inter_channel_delay_seconds", 0.25)),
             ),
         ),
         "bulk_channel_threshold": max(
             10,
             min(
                 500,
-                int(result.get("bulk_channel_threshold", 50)),
+                int(result.get("bulk_channel_threshold", 100)),
             ),
         ),
         "bulk_inter_channel_delay_seconds": max(
             0.0,
             min(
                 30.0,
-                float(result.get("bulk_inter_channel_delay_seconds", 1.5)),
+                float(result.get("bulk_inter_channel_delay_seconds", 0.5)),
             ),
         ),
         "flood_wait_safety_seconds": max(
@@ -339,11 +355,11 @@ def history_request_wait_seconds(settings):
         value = float(
             (settings or DEFAULT_SETTINGS).get(
                 "history_request_wait_seconds",
-                1.0,
+                0.5,
             )
         )
     except (TypeError, ValueError):
-        value = 1.0
+        value = 0.5
     return max(0.5, min(5.0, value))
 
 
@@ -354,31 +370,31 @@ def inter_channel_delay_seconds(settings, channel_count):
         normal = float(
             source.get(
                 "inter_channel_delay_seconds",
-                0.75,
+                0.25,
             )
         )
     except (TypeError, ValueError):
-        normal = 0.75
+        normal = 0.25
 
     try:
         bulk = float(
             source.get(
                 "bulk_inter_channel_delay_seconds",
-                1.5,
+                0.5,
             )
         )
     except (TypeError, ValueError):
-        bulk = 1.5
+        bulk = 0.5
 
     try:
         threshold = int(
             source.get(
                 "bulk_channel_threshold",
-                50,
+                100,
             )
         )
     except (TypeError, ValueError):
-        threshold = 50
+        threshold = 100
 
     normal = max(0.0, min(10.0, normal))
     bulk = max(normal, min(30.0, bulk))
@@ -4824,6 +4840,12 @@ def _v4_save_output(
             ),
 
             "digest_profile_version": DIGEST_PROFILE_VERSION,
+            "usage_hint": (
+                "Файл подготовлен для пользовательского анализа в выбранном "
+                "ИИ-ассистенте, например ChatGPT. Готовая редакционная инструкция "
+                "находится в recommended_digest_request. Программа не отправляет "
+                "файл во внешние сервисы автоматически."
+            ),
             "recommended_digest_request": (
                 DIGEST_REQUEST
             ),
@@ -5712,8 +5734,10 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
                 "quick_check_result": db_maintenance.get("quick_check_result"),
             },
             "usage_hint": (
-                "Локальный структурированный JSON-экспорт результатов поиска. "
-                "Вопрос, период и редакционная инструкция уже записаны внутри файла."
+                "Локальный структурированный JSON-экспорт для пользовательского "
+                "анализа в выбранном ИИ-ассистенте, например ChatGPT. Вопрос, "
+                "период и готовая инструкция уже записаны внутри файла; программа "
+                "не отправляет его во внешние сервисы автоматически."
             ),
             "recommended_digest_request": build_search_digest_instruction(
                 result["question"],
@@ -6012,15 +6036,20 @@ def open_and_select_file(path):
 # Main
 # ============================================================
 
-async def ensure_telegram_client(client, creds, settings=None):
+async def ensure_telegram_client(
+    client,
+    creds,
+    settings=None,
+    allow_reauthorization=False,
+):
     """
     Подключается к Telegram только когда это действительно нужно.
     Поиск по локальной news.db может работать вообще без Telegram.
 
     Если credentials.bin уже существует, но сохранённая сессия исчезла
     или перестала быть авторизованной, новый вход автоматически не
-    запускается: это отдельное событие безопасности, которое пользователь
-    должен сначала проверить.
+    запускается. Повторная авторизация разрешается только после явной
+    команды пользователя через восстановление Telegram-сессии.
     """
     if client is not None:
         try:
@@ -6035,12 +6064,14 @@ async def ensure_telegram_client(client, creds, settings=None):
     if (
         stored_credentials_at_start
         and not session_path.exists()
+        and not allow_reauthorization
     ):
         raise RuntimeError(
             "Найдены сохранённые Telegram credentials, но файл "
             "telegram_session.session отсутствует. Автоматическая "
             "повторная авторизация отключена. Восстановите сессию из "
-            "резервной копии или отдельно подтвердите создание новой."
+            "резервной копии или выберите T в главном меню, чтобы явно "
+            "создать новую Telegram-сессию."
         )
 
     # В Testing-ветке любой FloodWait должен дойти до нашего обработчика.
@@ -6066,6 +6097,7 @@ async def ensure_telegram_client(client, creds, settings=None):
             if (
                 stored_credentials_at_start
                 and not authorized
+                and not allow_reauthorization
             ):
                 try:
                     await candidate.disconnect()
@@ -6074,8 +6106,9 @@ async def ensure_telegram_client(client, creds, settings=None):
                         "Сохранённая Telegram-сессия больше не "
                         "авторизована. Автоматический повторный вход "
                         "отключён, чтобы не создавать лишние попытки "
-                        "авторизации. Закройте программу и сначала "
-                        "проверьте состояние аккаунта/сессии."
+                        "авторизации. Проверьте состояние аккаунта; "
+                        "если хотите создать новую сессию осознанно, "
+                        "выберите T в главном меню."
                     )
 
             if not authorized:
@@ -6124,6 +6157,51 @@ async def ensure_telegram_client(client, creds, settings=None):
             "Сессия сохранена — повторный ввод обычно не потребуется."
         )
         return candidate, creds
+
+async def recreate_telegram_session(client, creds, settings=None):
+    """Явно пересоздаёт только локальную Telegram-сессию по команде пользователя."""
+    print("\n=== Восстановление Telegram-сессии ===")
+    print(
+        "Используйте это, если telegram_session.session отсутствует, "
+        "отозван или вы сами хотите войти заново."
+    )
+    print(
+        "Будет удалён только локальный файл Telegram-сессии. "
+        "credentials.bin, выбранные каналы, news.db и дайджесты сохранятся."
+    )
+    choice = input("1 — создать новую сессию; 0 — назад: ").strip()
+    if choice != "1":
+        print("Восстановление отменено.")
+        return client, creds
+
+    if client is not None:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        client = None
+
+    for suffix in (".session", ".session-journal"):
+        path = Path(SESSION_FILE + suffix)
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError as exc:
+            raise RuntimeError(
+                f"Не удалось удалить локальный файл сессии {path.name}: {exc}"
+            ) from exc
+
+    print(
+        "Локальная Telegram-сессия очищена. "
+        "Сейчас Telegram запросит новый код входа."
+    )
+    return await ensure_telegram_client(
+        None,
+        creds,
+        settings,
+        allow_reauthorization=True,
+    )
+
 
 
 async def _v4_main():
@@ -6217,16 +6295,25 @@ async def _v4_main():
                 "  N         — создать список каналов заново"
             )
             print("  I         — состояние базы и каналов")
+            print("  T         — восстановить Telegram-сессию")
             print(
                 "  0         — выйти"
             )
 
             mode = input(
-                "Выбор [Enter/D/S/B/A/R/L/N/I/0]: "
+                "Выбор [Enter/D/S/B/A/R/L/N/I/T/0]: "
             ).strip().lower()
 
             if mode in ("i", "status"):
                 print_database_status(conn, load_selection())
+                continue
+
+            if mode in ("t", "session", "сессия", "восстановить"):
+                client, creds = await recreate_telegram_session(
+                    client,
+                    creds,
+                    settings,
+                )
                 continue
 
             if is_back_command(mode) or mode in (
