@@ -71,6 +71,7 @@ CONTINUITY_LOOKBACK_DAYS = 3
 CONTINUITY_MAX_MESSAGES = 40
 CONTINUITY_PER_CURRENT_MESSAGE = 2
 CONTINUITY_SOURCE_DIGESTS = 3
+CONTINUITY_RELATED_CURRENT_LIMIT = 5
 
 
 # ============================================================
@@ -4515,6 +4516,14 @@ def _continuity_message_tokens(message):
     URL удаляются заранее: постоянная профильная/рекламная ссылка не должна
     становиться лексическим признаком одного сюжета.
     """
+    continuity_stopwords = {
+        # Минимальный отдельный слой для слов, которые могут случайно выглядеть
+        # "редкими" в коротком трёхдневном окне, но сами по себе не описывают
+        # событие. Основной набор служебных слов переиспользуется из поиска.
+        "часть", "части", "частью", "частина", "частини",
+        "прямо", "всего", "всього", "просто", "более", "больше", "більше",
+        "около", "близько", "также", "також",
+    }
     text = re.sub(
         r"https?://\S+",
         " ",
@@ -4530,10 +4539,20 @@ def _continuity_message_tokens(message):
     for token in tokens:
         if len(token) < 5 or token.isdigit():
             continue
+        normalized = normalize_search_token(token)
+        if (
+            normalized in SEARCH_STOPWORDS
+            or normalized in continuity_stopwords
+        ):
+            continue
         # search_stem_prefix определён ниже в модуле; к моменту выполнения
         # дайджеста модуль уже полностью загружен.
-        stem = search_stem_prefix(token)
-        if len(stem) >= 5:
+        stem = search_stem_prefix(normalized)
+        if (
+            len(stem) >= 5
+            and stem not in SEARCH_STOPWORDS
+            and stem not in continuity_stopwords
+        ):
             result.add(stem)
     return result
 
@@ -4555,6 +4574,93 @@ def _continuity_specific_urls(message):
         for url in message.get("canonical_urls", []) or []
         if is_specific_shared_source_url(url)
     }
+
+
+def _continuity_same_channel(first, second):
+    first_id = int(first.get("channel_id") or 0)
+    second_id = int(second.get("channel_id") or 0)
+    if first_id and second_id:
+        return first_id == second_id
+
+    first_username = str(first.get("username") or "").lstrip("@").casefold()
+    second_username = str(second.get("username") or "").lstrip("@").casefold()
+    return bool(first_username and first_username == second_username)
+
+
+def _continuity_url_owner_name(url):
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url.strip())
+    except Exception:
+        return None
+
+    host = (parts.hostname or "").lower()
+    segments = [
+        segment
+        for segment in (parts.path or "").strip("/").split("/")
+        if segment
+    ]
+
+    if host in {"t.me", "telegram.me"}:
+        if len(segments) < 2 or not segments[-1].isdigit():
+            return None
+        if segments[0].lower() == "s" and len(segments) >= 3:
+            return segments[1].lstrip("@").casefold()
+        if segments[0].lower() == "c":
+            return None
+        return segments[0].lstrip("@").casefold()
+
+    if host == "max.ru" and len(segments) >= 2:
+        if segments[0].lower() in {"join", "joinchannel"}:
+            return None
+        return segments[0].lstrip("@").casefold()
+
+    return None
+
+
+def _continuity_message_public_names(message):
+    names = set()
+    username = str(message.get("username") or "").lstrip("@").casefold()
+    if username:
+        names.add(username)
+
+    channel_url = message.get("channel_url")
+    if isinstance(channel_url, str):
+        try:
+            parts = urlsplit(channel_url.strip())
+        except Exception:
+            parts = None
+        if parts:
+            host = (parts.hostname or "").lower()
+            segments = [
+                segment
+                for segment in (parts.path or "").strip("/").split("/")
+                if segment
+            ]
+            if host in {"t.me", "telegram.me", "max.ru"} and segments:
+                candidate = segments[0].lstrip("@").casefold()
+                if candidate and candidate not in {"join", "joinchannel", "c", "s"}:
+                    names.add(candidate)
+    return names
+
+
+def _continuity_is_same_channel_self_link(current_message, previous_message, url):
+    """
+    Конкретная ссылка на старый пост того же канала — полезный дополнительный
+    сигнал, но не самостоятельное доказательство продолжения сюжета.
+    """
+    if not _continuity_same_channel(current_message, previous_message):
+        return False
+
+    owner = _continuity_url_owner_name(url)
+    if not owner:
+        return False
+
+    return owner in (
+        _continuity_message_public_names(current_message)
+        | _continuity_message_public_names(previous_message)
+    )
 
 
 def load_recent_continuity_messages(
@@ -4691,10 +4797,11 @@ def build_continuity_context(
     """
     Строит ограниченный контекст предыстории.
 
-    Сильные связи: reply, тот же конкретный origin или canonical URL.
-    Лексическая связь намеренно консервативна: нужны несколько редких общих
-    лексем; для другого канала порог выше. Это только candidate hint для ИИ,
-    а не утверждение, что публикации описывают одно событие.
+    Безусловно сильный сигнал — reply на старое сообщение. Общий конкретный
+    внешний источник тоже остаётся strong, но внутренняя ссылка на старый пост
+    того же канала становится только дополнительным признаком и требует
+    содержательного lexical_candidate. Чистая лексическая связь использует
+    только допустимые токены и более строгие пороги.
     """
     current = [
         message
@@ -4724,7 +4831,7 @@ def build_continuity_context(
 
     prior_by_key = {}
     prior_tokens = {}
-    token_docs = {}
+    prior_token_docs = {}
     origin_index = {}
     url_index = {}
     direct_index = {}
@@ -4747,9 +4854,23 @@ def build_continuity_context(
         tokens = _continuity_message_tokens(message)
         prior_tokens[key] = tokens
         for token in tokens:
-            token_docs.setdefault(token, set()).add(key)
+            prior_token_docs.setdefault(token, set()).add(key)
 
-    document_count = max(1, len(prior_by_key))
+    current_tokens_by_key = {}
+    token_document_frequency = Counter()
+    for tokens in prior_tokens.values():
+        token_document_frequency.update(tokens)
+
+    for message in current:
+        key = message.get("message_key") or message_key(message)
+        tokens = _continuity_message_tokens(message)
+        current_tokens_by_key[key] = tokens
+        token_document_frequency.update(tokens)
+
+    document_count = max(
+        1,
+        len(prior_tokens) + len(current_tokens_by_key),
+    )
     rare_limit = max(3, int(math.ceil(document_count * 0.03)))
     common_limit = max(8, int(math.ceil(document_count * 0.12)))
 
@@ -4776,6 +4897,11 @@ def build_continuity_context(
                 "match_reasons": set(),
                 "match_strength": strength,
                 "score": float(score),
+                "current_date": (
+                    current_message.get("date_utc")
+                    or current_message.get("date_local")
+                    or ""
+                ),
             },
         )
         link["match_reasons"].update(reasons)
@@ -4791,6 +4917,7 @@ def build_continuity_context(
             or message_key(current_message)
         )
         candidates = {}
+        soft_source_reasons = {}
 
         def mark(prior_key, reason, strength=2, score=100.0):
             if not prior_key or prior_key == current_key:
@@ -4809,6 +4936,13 @@ def build_continuity_context(
             item["strength"] = max(item["strength"], strength)
             item["score"] = max(item["score"], float(score))
 
+        def mark_soft_source(prior_key, reason):
+            if not prior_key or prior_key == current_key:
+                return
+            if prior_key not in prior_by_key:
+                return
+            soft_source_reasons.setdefault(prior_key, set()).add(reason)
+
         reply_to = current_message.get("reply_to_message_id")
         if reply_to is not None:
             mark(
@@ -4822,64 +4956,91 @@ def build_continuity_context(
         origin = _continuity_specific_origin(current_message)
         if origin:
             for prior_key in origin_index.get(origin, set()):
-                mark(prior_key, "same_specific_origin")
+                previous = prior_by_key[prior_key]
+                if (
+                    origin.startswith("url:")
+                    and _continuity_is_same_channel_self_link(
+                        current_message,
+                        previous,
+                        origin[4:],
+                    )
+                ):
+                    mark_soft_source(prior_key, "same_specific_origin")
+                else:
+                    mark(prior_key, "same_specific_origin")
 
         for url in _continuity_specific_urls(current_message):
             for prior_key in url_index.get(url, set()):
-                mark(prior_key, "same_specific_url")
+                previous = prior_by_key[prior_key]
+                if _continuity_is_same_channel_self_link(
+                    current_message,
+                    previous,
+                    url,
+                ):
+                    mark_soft_source(prior_key, "same_specific_url")
+                else:
+                    mark(prior_key, "same_specific_url")
 
-        current_tokens = _continuity_message_tokens(current_message)
+        current_tokens = current_tokens_by_key.get(current_key, set())
+        eligible_current = {
+            token
+            for token in current_tokens
+            if token_document_frequency.get(token, 0) <= common_limit
+        }
         candidate_counts = Counter()
-        for token in current_tokens:
-            docs = token_docs.get(token)
-            if not docs or len(docs) > common_limit:
-                continue
-            for prior_key in docs:
+        for token in eligible_current:
+            for prior_key in prior_token_docs.get(token, ()):
                 candidate_counts[prior_key] += 1
 
         for prior_key, shared_count in candidate_counts.items():
-            if prior_key == current_key or shared_count < 2:
+            if prior_key == current_key or shared_count < 3:
                 continue
 
             previous = prior_by_key[prior_key]
             previous_set = prior_tokens.get(prior_key, set())
-            shared = current_tokens & previous_set
-            if len(shared) < 2:
+            eligible_previous = {
+                token
+                for token in previous_set
+                if token_document_frequency.get(token, 0) <= common_limit
+            }
+            eligible_shared = eligible_current & eligible_previous
+            if len(eligible_shared) < 3:
                 continue
+
             rare_shared = sum(
                 1
-                for token in shared
-                if len(token_docs.get(token, ())) <= rare_limit
+                for token in eligible_shared
+                if token_document_frequency.get(token, 0) <= rare_limit
             )
 
-            same_channel = (
-                int(current_message.get("channel_id") or 0)
-                == int(previous.get("channel_id") or 0)
+            same_channel = _continuity_same_channel(
+                current_message,
+                previous,
             )
             if same_channel:
-                if len(shared) < 2 or rare_shared < 1:
+                if len(eligible_shared) < 3 or rare_shared < 2:
                     continue
             else:
-                # Между разными каналами лексический сигнал строже:
-                # минимум три общие содержательные лексемы, из них две редкие.
-                if len(shared) < 3 or rare_shared < 2:
+                if len(eligible_shared) < 4 or rare_shared < 3:
                     continue
 
-            overlap = len(shared) / max(
+            overlap = len(eligible_shared) / max(
                 1,
-                min(len(current_tokens), len(previous_set)),
+                min(len(eligible_current), len(eligible_previous)),
             )
+            if overlap < 0.20:
+                continue
 
             idf_score = sum(
                 math.log(
                     (document_count + 1)
-                    / (len(token_docs.get(token, ())) + 1)
+                    / (token_document_frequency.get(token, 0) + 1)
                 ) + 1.0
-                for token in shared
+                for token in eligible_shared
             )
             lexical_score_value = (
                 idf_score
-                + len(shared) * 0.5
+                + len(eligible_shared) * 0.5
                 + overlap * 4.0
             )
             if lexical_score_value < 5.0:
@@ -4891,6 +5052,13 @@ def build_continuity_context(
                 strength=1,
                 score=lexical_score_value,
             )
+            for reason in soft_source_reasons.get(prior_key, ()):
+                mark(
+                    prior_key,
+                    reason,
+                    strength=1,
+                    score=lexical_score_value,
+                )
 
         ordered = sorted(
             candidates.items(),
@@ -4934,8 +5102,18 @@ def build_continuity_context(
         context_message.pop("change_status", None)
         context_message.pop("related_group_id", None)
 
+        ordered_links = sorted(
+            record["links"].values(),
+            key=lambda item: (
+                item["match_strength"],
+                item["score"],
+                item["current_date"],
+            ),
+            reverse=True,
+        )[:CONTINUITY_RELATED_CURRENT_LIMIT]
+
         links = []
-        for item in record["links"].values():
+        for item in ordered_links:
             links.append({
                 "message_ref": item["message_ref"],
                 "match_reasons": sorted(item["match_reasons"]),
