@@ -72,7 +72,7 @@ CONTINUITY_MAX_MESSAGES = 40
 CONTINUITY_PER_CURRENT_MESSAGE = 2
 CONTINUITY_SOURCE_DIGESTS = 3
 CONTINUITY_RELATED_CURRENT_LIMIT = 5
-CONTINUITY_EVENT_ANCHOR_LEAD_TOKENS = 20
+CONTINUITY_EVENT_ANCHOR_LEAD_TOKENS = 28
 CONTINUITY_EVENT_ANCHOR_PAIR_WINDOW = 4
 
 
@@ -4609,7 +4609,7 @@ def _continuity_event_anchor_pairs(message):
         for right_index in range(left_index + 1, upper):
             right = lead_tokens[right_index]
             if left != right:
-                pairs.add((left, right))
+                pairs.add(tuple(sorted((left, right))))
     return pairs
 
 
