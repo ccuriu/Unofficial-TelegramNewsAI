@@ -1673,6 +1673,348 @@ class OfflineRegressionTests(unittest.TestCase):
         context = collector.build_continuity_context([current], [prior])
         self.assertEqual(context["messages_count"], 0)
 
+    def test_continuity_reply_stays_strong_without_lexical_similarity(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "channel_a",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": "Короткая заметка о переговорах компании",
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "channel_a",
+            "message_id": 11,
+            "reply_to_message_id": 10,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Итог опубликован",
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "strong")
+        self.assertIn(
+            "reply_to_previous_message",
+            relation["match_reasons"],
+        )
+
+    def test_continuity_same_channel_telegram_self_link_is_not_strong(self):
+        shared_url = "https://t.me/ZE_kartel/13821"
+        prior = {
+            "channel_id": 1447182889,
+            "channel": "Картель",
+            "username": "ZE_kartel",
+            "channel_url": "https://t.me/ZE_kartel",
+            "message_id": 13840,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": (
+                "Американский пакет вооружений включает средства ПВО "
+                "и поставки для комплексов Patriot"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+        current = {
+            "channel_id": 1447182889,
+            "channel": "Картель",
+            "username": "ZE_kartel",
+            "channel_url": "https://t.me/ZE_kartel",
+            "message_id": 13849,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": (
+                "Российские разработчики ускорили развитие новых "
+                "беспилотных аппаратов и систем наведения"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_second_real_self_link_pattern_is_not_strong(self):
+        shared_url = "https://t.me/MediaKiller2021/24689"
+        prior = {
+            "channel_id": 1559000001,
+            "channel": "MediaKiller",
+            "username": "MediaKiller2021",
+            "channel_url": "https://t.me/MediaKiller2021",
+            "message_id": 24700,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": (
+                "После удара по Днепру обсуждается возможное применение "
+                "нового типа ракеты Дань-Т"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+        current = {
+            "channel_id": 1559000001,
+            "channel": "MediaKiller",
+            "username": "MediaKiller2021",
+            "channel_url": "https://t.me/MediaKiller2021",
+            "message_id": 24720,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": (
+                "Украинский перехватчик испытывают против реактивных "
+                "беспилотников на новом полигоне"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_same_channel_max_self_link_is_not_strong(self):
+        shared_url = "https://max.ru/channel_vmax/AZ9FDVpHASw"
+        prior = {
+            "channel_id": 1,
+            "channel": "channel_vmax",
+            "username": "channel_vmax",
+            "channel_url": "https://t.me/channel_vmax",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": "Материал о ремонте промышленного предприятия",
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "channel_vmax",
+            "username": "channel_vmax",
+            "channel_url": "https://t.me/channel_vmax",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Отдельная публикация о космическом телескопе",
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_self_link_can_support_but_not_upgrade_lexical_match(self):
+        shared_url = "https://t.me/ZE_kartel/13821"
+        prior = {
+            "channel_id": 1447182889,
+            "channel": "Картель",
+            "username": "ZE_kartel",
+            "channel_url": "https://t.me/ZE_kartel",
+            "message_id": 13840,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": (
+                "Patriot перехватчики американский пакет поставки "
+                "противовоздушной обороны"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+        current = {
+            "channel_id": 1447182889,
+            "channel": "Картель",
+            "username": "ZE_kartel",
+            "channel_url": "https://t.me/ZE_kartel",
+            "message_id": 13849,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": (
+                "Американский пакет поставки Patriot включает новые "
+                "перехватчики противовоздушной обороны"
+            ),
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "candidate")
+        self.assertIn("lexical_candidate", relation["match_reasons"])
+        self.assertIn("same_specific_url", relation["match_reasons"])
+
+    def test_continuity_common_language_noise_does_not_create_lexical_link(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": (
+                "После авиаудара часть объектов повреждена, всего около "
+                "десяти зданий, более точные данные появятся позже"
+            ),
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": (
+                "Советские компьютеры просто занимали более крупную часть "
+                "помещения, всего около нескольких шкафов"
+            ),
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_vinnytsia_incident_survives_cross_channel_threshold(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": (
+                "В Виннице местные жители отбили мужчину, которого сотрудники "
+                "ТЦК пытались силой увезти в микроавтобусе"
+            ),
+        }
+        current = {
+            "channel_id": 2,
+            "channel": "Канал B",
+            "message_id": 20,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": (
+                "В Виннице местные жители вмешались, когда сотрудники "
+                "пытались силой доставить мужчину к микроавтобусу"
+            ),
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "candidate")
+        self.assertIn("lexical_candidate", relation["match_reasons"])
+
+    def test_continuity_voting_day_to_poll_closure_survives(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": (
+                "Начался последний день голосования на парламентских выборах, "
+                "избирательные участки открылись утром"
+            ),
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 11,
+            "date_utc": "2026-09-19T18:00:00+00:00",
+            "text": (
+                "Завершился последний день голосования на парламентских "
+                "выборах: избирательные участки закрылись"
+            ),
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "candidate")
+
+    def test_continuity_pelican_type_correction_survives(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": (
+                "Первоначально Pelican FP-7 назвали реактивной ракетой, "
+                "дальность системы оценивали в 350 километров"
+            ),
+        }
+        current = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "message_id": 11,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": (
+                "Позже тип Pelican FP-7 уточнили: это беспилотная система, "
+                "заявленная дальность составляет 350 километров"
+            ),
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        relation = context["messages"][0]["related_current_message_refs"][0]
+        self.assertEqual(relation["match_strength"], "candidate")
+
+    def test_continuity_repeated_short_air_alert_template_is_not_story(self):
+        prior = []
+        for message_id in range(10, 20):
+            prior.append({
+                "channel_id": 1,
+                "channel": "Харьков",
+                "username": "kharkiv",
+                "message_id": message_id,
+                "date_utc": f"2026-09-18T{message_id:02d}:00:00+00:00",
+                "text": (
+                    "Харків повітряна тривога негайно пройдіть в укриття"
+                ),
+            })
+        current = {
+            "channel_id": 1,
+            "channel": "Харьков",
+            "username": "kharkiv",
+            "message_id": 30,
+            "date_utc": "2026-09-19T08:00:00+00:00",
+            "text": "Харків повітряна тривога негайно пройдіть в укриття",
+        }
+
+        context = collector.build_continuity_context([current], prior)
+        self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_context_fanout_is_capped_and_strong_is_retained(self):
+        groups = [
+            ("alphaone", "betatwo", "gammathree"),
+            ("deltaone", "epsilontwo", "zetathree"),
+            ("etaalpha", "thetabeta", "iotagamma"),
+            ("kappaone", "lambdatwo", "muthree"),
+            ("nuone", "xitwo", "omicronthree"),
+            ("pione", "rhotwo", "sigmathree"),
+        ]
+        prior = {
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "channel_a",
+            "message_id": 10,
+            "date_utc": "2026-09-18T08:00:00+00:00",
+            "text": " ".join(token for group in groups for token in group),
+        }
+        current = []
+        for offset, group in enumerate(groups, start=1):
+            current.append({
+                "channel_id": 1,
+                "channel": "Канал A",
+                "username": "channel_a",
+                "message_id": 10 + offset,
+                "date_utc": f"2026-09-19T0{offset}:00:00+00:00",
+                "text": " ".join(group),
+            })
+        current.append({
+            "channel_id": 1,
+            "channel": "Канал A",
+            "username": "channel_a",
+            "message_id": 99,
+            "reply_to_message_id": 10,
+            "date_utc": "2026-09-19T00:30:00+00:00",
+            "text": "Отдельное прямое уточнение",
+        })
+
+        context = collector.build_continuity_context(current, [prior])
+        links = context["messages"][0]["related_current_message_refs"]
+        self.assertEqual(
+            len(links),
+            collector.CONTINUITY_RELATED_CURRENT_LIMIT,
+        )
+        self.assertEqual(links[0]["message_ref"]["message_id"], 99)
+        self.assertEqual(links[0]["match_strength"], "strong")
+        self.assertTrue(
+            all(
+                len(item["related_current_message_refs"])
+                <= collector.CONTINUITY_RELATED_CURRENT_LIMIT
+                for item in context["messages"]
+            )
+        )
+
     def test_continuity_context_is_bounded_per_current_message(self):
         current = {
             "channel_id": 1,
