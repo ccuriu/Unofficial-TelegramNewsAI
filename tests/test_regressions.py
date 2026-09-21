@@ -2080,6 +2080,8 @@ class OfflineRegressionTests(unittest.TestCase):
                 "Альфастрой объявила переговоры о покупке "
                 "Северного машиностроительного завода"
             ),
+            "change_status": "existing",
+            "related_group_id": "related_old",
         }
         sync_stats = {
             "new_messages_saved": 1,
@@ -2123,13 +2125,18 @@ class OfflineRegressionTests(unittest.TestCase):
             payload["continuity_context"]["messages_count"],
             1,
         )
-        self.assertEqual(
-            payload["continuity_context"]["messages"][0]
-            ["context_message"]["message_id"],
-            10,
+        context_message = (
+            payload["continuity_context"]["messages"][0]["context_message"]
         )
+        self.assertEqual(context_message["message_id"], 10)
+        self.assertNotIn("change_status", context_message)
+        self.assertNotIn("related_group_id", context_message)
         self.assertEqual(
             payload["meta"]["continuity_context_messages"],
+            1,
+        )
+        self.assertEqual(
+            payload["meta"]["news_messages_after_cleanup"],
             1,
         )
 
