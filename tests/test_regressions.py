@@ -1986,6 +1986,361 @@ class OfflineRegressionTests(unittest.TestCase):
         context = collector.build_continuity_context([current], prior)
         self.assertEqual(context["messages_count"], 0)
 
+    def test_continuity_event_anchor_keeps_school_investigation_but_rejects_ai_topic_only(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "СОЛОВЬЁВ",
+            "message_id": 10,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": (
+                "Bloomberg: США разбомбили иранскую школу из-за ошибки искусственного интеллекта\n\n"
+                "Расследование выявило устаревшие разведданные, спутниковые снимки "
+                "и чрезмерную опору на систему Maven Smart System от Palantir."
+            ),
+        }
+        same_story = {
+            "channel_id": 2,
+            "channel": "Милитарист",
+            "message_id": 20,
+            "date_utc": "2026-09-21T10:12:02+00:00",
+            "text": (
+                "На прошедшей неделе Пентагон почти завершил расследование причин "
+                "удара по детской школе в иранском Минабе. Bloomberg сообщает, "
+                "что военные слишком сильно полагались на Maven Smart System "
+                "компании Palantir и устаревшие разведывательные данные."
+            ),
+        }
+        data_center = {
+            "channel_id": 3,
+            "channel": "Милитарист",
+            "message_id": 30,
+            "date_utc": "2026-09-21T11:58:45+00:00",
+            "text": (
+                "Дата-центр в штате Нью-Джерси случайно вылил тонны дизельного "
+                "топлива в охраняемую водно-болотную территорию, что подчеркивает "
+                "экологические риски инфраструктуры искусственного интеллекта.\n\n"
+                "Системы искусственного интеллекта требуют крупной инфраструктуры, "
+                "данных, вычислений и энергетических ресурсов."
+            ),
+        }
+        background = []
+        for offset in range(10):
+            background.append({
+                "channel_id": 100 + offset,
+                "channel": f"AI фон {offset}",
+                "message_id": 1000 + offset,
+                "date_utc": f"2026-09-21T0{offset % 9}:00:00+00:00",
+                "text": (
+                    "Инфраструктура искусственного интеллекта развивается "
+                    f"в отдельном секторе uniqueanchor{offset}"
+                ),
+            })
+
+        context = collector.build_continuity_context(
+            [same_story, data_center, *background],
+            [prior],
+        )
+        refs = {
+            ref["message_ref"]["message_id"]: ref
+            for item in context["messages"]
+            for ref in item["related_current_message_refs"]
+            if item["context_message"]["message_id"] == 10
+        }
+
+        self.assertIn(20, refs)
+        self.assertEqual(refs[20]["match_strength"], "candidate")
+        self.assertNotIn(30, refs)
+
+    def test_continuity_event_anchor_separates_novovolynsk_from_inter_kyiv(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "XUA",
+            "message_id": 10,
+            "date_utc": "2026-09-20T11:57:07+00:00",
+            "text": (
+                "В Нововолынске очевидцы сняли момент, как мужчину силой "
+                "помещают в микроавтобус\n\n"
+                "Несколько человек в военной форме удерживают мужчину и "
+                "заталкивают его в микроавтобус."
+            ),
+        }
+        same_story = {
+            "channel_id": 2,
+            "channel": "Канал B",
+            "message_id": 20,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": (
+                "В Нововолынске мужчина пытался избежать принудительной посадки "
+                "в микроавтобус, очевидцы вмешались в конфликт\n\n"
+                "На кадрах люди в военной форме удерживают мужчину."
+            ),
+        }
+        inter_kyiv = {
+            "channel_id": 3,
+            "channel": "Сплетница",
+            "message_id": 30,
+            "date_utc": "2026-09-21T09:00:00+00:00",
+            "text": (
+                "Мобилизационного конфликта не избежал представитель СМИ.\n\n"
+                "Сотрудника телеканала Интер задержали возле студии в Киеве. "
+                "На видео люди в военной форме удерживают мужчину и заталкивают "
+                "его в машину."
+            ),
+        }
+
+        context = collector.build_continuity_context(
+            [same_story, inter_kyiv],
+            [prior],
+        )
+        refs = {
+            ref["message_ref"]["message_id"]
+            for item in context["messages"]
+            for ref in item["related_current_message_refs"]
+            if item["context_message"]["message_id"] == 10
+        }
+        self.assertIn(20, refs)
+        self.assertNotIn(30, refs)
+
+    def test_continuity_event_anchor_does_not_merge_recurring_daily_regional_briefings(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "Регион",
+            "message_id": 10,
+            "date_utc": "2026-09-20T06:00:00+00:00",
+            "text": (
+                "Суточная сводка по Харьковской области за 20 сентября.\n\n"
+                "За сутки удары затронули населенные пункты, повреждены дома "
+                "и инфраструктура, сообщают областные власти."
+            ),
+        }
+        next_day = {
+            "channel_id": 1,
+            "channel": "Регион",
+            "message_id": 11,
+            "date_utc": "2026-09-21T06:00:00+00:00",
+            "text": (
+                "Суточная сводка по Харьковской области за 21 сентября.\n\n"
+                "За сутки новые удары затронули населенные пункты, повреждены дома "
+                "и инфраструктура, сообщают областные власти."
+            ),
+        }
+        background = []
+        for offset in range(10):
+            background.append({
+                "channel_id": 20 + offset,
+                "channel": f"Региональный фон {offset}",
+                "message_id": 100 + offset,
+                "date_utc": f"2026-09-21T{7 + offset:02d}:00:00+00:00",
+                "text": (
+                    "Суточная сводка по Харьковской области.\n\n"
+                    f"Отдельная тема района uniqueplace{offset}"
+                ),
+            })
+
+        context = collector.build_continuity_context(
+            [next_day, *background],
+            [prior],
+        )
+        refs = {
+            ref["message_ref"]["message_id"]
+            for item in context["messages"]
+            for ref in item["related_current_message_refs"]
+            if item["context_message"]["message_id"] == 10
+        }
+        self.assertNotIn(11, refs)
+
+    def test_continuity_event_anchor_keeps_conversion_center_reprints_but_rejects_other_crypto_fraud(self):
+        prior = {
+            "channel_id": 1,
+            "channel": "INSIDER",
+            "message_id": 10,
+            "date_utc": "2026-09-20T13:28:39+00:00",
+            "text": (
+                "Разоблачён конвертационный центр, через который ежемесячно "
+                "проходило около 500 млн грн, сообщили Офис Генпрокурора и БЭБ.\n\n"
+                "Общий объем финансовых операций составил 23,5 млрд грн. "
+                "Средства выводились через криптовалюту, участникам сообщили о подозрении."
+            ),
+        }
+        reprint = {
+            "channel_id": 2,
+            "channel": "Шептун",
+            "message_id": 20,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": (
+                "Офис Генпрокурора и БЭБ разоблачили конвертационный центр, "
+                "через который ежемесячно проходило около 500 млн грн.\n\n"
+                "Объем финансовых операций достиг 23,5 млрд грн, средства "
+                "выводились через криптовалюту."
+            ),
+        }
+        czech_fraud = {
+            "channel_id": 3,
+            "channel": "Канал C",
+            "message_id": 30,
+            "date_utc": "2026-09-21T09:00:00+00:00",
+            "text": (
+                "В Чехии раскрыли отдельное криптовалютное мошенничество "
+                "с поддельной инвестиционной платформой.\n\n"
+                "Следствие проверяет финансовые операции на миллионы, движение "
+                "средств через криптовалюту и готовит подозрения участникам схемы."
+            ),
+        }
+
+        context = collector.build_continuity_context(
+            [reprint, czech_fraud],
+            [prior],
+        )
+        refs = {
+            ref["message_ref"]["message_id"]
+            for item in context["messages"]
+            for ref in item["related_current_message_refs"]
+            if item["context_message"]["message_id"] == 10
+        }
+        self.assertIn(20, refs)
+        self.assertNotIn(30, refs)
+
+    def test_continuity_event_anchor_rejects_real_topic_only_false_positive_classes(self):
+        cases = [
+            (
+                "locomotives_vs_polish_sirens",
+                (
+                    "Российский удар повредил украинские локомотивы в "
+                    "железнодорожном депо.\n\n"
+                    "Удары по транспортной инфраструктуре у границы усилили "
+                    "риски, власти обсуждают безопасность и защиту объектов."
+                ),
+                (
+                    "Польша установит автоматические сирены на границе с Украиной.\n\n"
+                    "После ударов по инфраструктуре у границы власти усиливают "
+                    "безопасность и защиту транспортных объектов."
+                ),
+            ),
+            (
+                "railway_vs_russian_speakers",
+                (
+                    "Повреждены украинские локомотивы и железнодорожная техника.\n\n"
+                    "Украина обсуждает транспорт, инфраструктуру, государственную "
+                    "политику и последствия войны для граждан."
+                ),
+                (
+                    "Политик выступил с заявлением о русскоязычных гражданах Украины.\n\n"
+                    "Украина обсуждает государственную политику, последствия войны, "
+                    "инфраструктуру и транспорт для граждан."
+                ),
+            ),
+            (
+                "patriot_vs_global_diesel_shortage",
+                (
+                    "Украине не хватает ракет-перехватчиков Patriot для систем ПВО.\n\n"
+                    "Дефицит поставок, сокращение запасов в США и растущая потребность "
+                    "подталкивают цены и осложняют мировой рынок."
+                ),
+                (
+                    "Глобальный дефицит дизельного топлива сохранится до следующего года.\n\n"
+                    "Дефицит поставок, сокращение запасов в США и растущая потребность "
+                    "подталкивают цены и осложняют мировой рынок."
+                ),
+            ),
+            (
+                "pika_vs_daily_ai_digest",
+                (
+                    "Pika полностью перезапустила платформу для создания контента с ИИ.\n\n"
+                    "Платформа объединяет модели, генерацию видео, изображения, "
+                    "контент и инструменты для пользователей."
+                ),
+                (
+                    "Главные новости индустрии искусственного интеллекта за сутки.\n\n"
+                    "Новые платформы и модели улучшают генерацию видео, изображения, "
+                    "контент и инструменты для пользователей."
+                ),
+            ),
+        ]
+
+        for index, (label, prior_text, current_text) in enumerate(cases, start=1):
+            with self.subTest(label=label):
+                prior = {
+                    "channel_id": 100 + index,
+                    "channel": "Контекст",
+                    "message_id": 10,
+                    "date_utc": "2026-09-20T08:00:00+00:00",
+                    "text": prior_text,
+                }
+                current = {
+                    "channel_id": 200 + index,
+                    "channel": "Текущее",
+                    "message_id": 20,
+                    "date_utc": "2026-09-21T08:00:00+00:00",
+                    "text": current_text,
+                }
+                context = collector.build_continuity_context([current], [prior])
+                self.assertEqual(context["messages_count"], 0)
+
+    def test_continuity_event_anchor_keeps_real_same_event_classes(self):
+        cases = [
+            (
+                "rassvet_beskrestnov",
+                "Бескрестнов сообщил, что система Рассвет перехватила реактивный беспилотник над регионом.",
+                "Заявление Бескрестнова о системе Рассвет: перехват реактивного беспилотника подтвержден новыми данными.",
+            ),
+            (
+                "same_tusk_poll",
+                "Опрос IBRiS показал изменение рейтинга правительства Дональда Туска среди польских избирателей.",
+                "Тот же опрос IBRiS фиксирует рейтинг правительства Дональда Туска и настроения польских избирателей.",
+            ),
+            (
+                "same_ft_metallurgy_story",
+                "Financial Times сообщает о кризисе металлургических предприятий Украины и сокращении производства стали.",
+                "По данным Financial Times, металлургические предприятия Украины сокращают производство стали из-за кризиса отрасли.",
+            ),
+            (
+                "election_closure_to_count",
+                "Избирательные участки закрылись после парламентских выборов, начался подсчет голосов и публикация первых данных.",
+                "После закрытия избирательных участков продолжается подсчет голосов парламентских выборов, появились предварительные данные.",
+            ),
+            (
+                "election_count_to_preliminary_results",
+                "Продолжается подсчет голосов парламентских выборов, комиссии публикуют первые предварительные данные.",
+                "Предварительные результаты парламентских выборов опубликованы после подсчета голосов большинством комиссий.",
+            ),
+            (
+                "fuel_prices_kuyun",
+                "Сергей Куюн заявил, что цены дизельного топлива на украинских АЗС продолжат расти из-за дефицита.",
+                "Сергей Куюн сообщил новые данные: цены дизельного топлива на украинских АЗС выросли на фоне дефицита.",
+            ),
+            (
+                "vivaldi_shandrigolovo",
+                "Операция Вивальди в районе Шандриголово продолжается, подразделения сообщили о продвижении.",
+                "Новые данные по операции Вивальди у Шандриголово: подразделения подтвердили дальнейшее продвижение.",
+            ),
+        ]
+
+        for index, (label, prior_text, current_text) in enumerate(cases, start=1):
+            with self.subTest(label=label):
+                prior = {
+                    "channel_id": 300 + index,
+                    "channel": "Канал A",
+                    "message_id": 10,
+                    "date_utc": "2026-09-20T08:00:00+00:00",
+                    "text": prior_text,
+                }
+                current = {
+                    "channel_id": 400 + index,
+                    "channel": "Канал B",
+                    "message_id": 20,
+                    "date_utc": "2026-09-21T08:00:00+00:00",
+                    "text": current_text,
+                }
+                context = collector.build_continuity_context([current], [prior])
+                self.assertEqual(
+                    context["messages_count"],
+                    1,
+                    msg=label,
+                )
+                relation = context["messages"][0]["related_current_message_refs"][0]
+                self.assertEqual(relation["match_strength"], "candidate", msg=label)
+                self.assertIn("lexical_candidate", relation["match_reasons"], msg=label)
+
     def test_continuity_context_fanout_is_capped_and_strong_is_retained(self):
         groups = [
             ("alphaone", "betatwo", "gammathree"),
