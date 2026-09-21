@@ -72,6 +72,8 @@ CONTINUITY_MAX_MESSAGES = 40
 CONTINUITY_PER_CURRENT_MESSAGE = 2
 CONTINUITY_SOURCE_DIGESTS = 3
 CONTINUITY_RELATED_CURRENT_LIMIT = 5
+CONTINUITY_EVENT_ANCHOR_LEAD_TOKENS = 28
+CONTINUITY_EVENT_ANCHOR_PAIR_WINDOW = 4
 
 
 # ============================================================
@@ -4557,6 +4559,89 @@ def _continuity_message_tokens(message):
     return result
 
 
+
+def _continuity_event_anchor_pairs(message):
+    """
+    Редкие локальные пары в начале сообщения для отделения продолжения
+    конкретного эпизода от просто похожей темы.
+
+    Используется только как дополнительный gate для lexical_candidate.
+    Strong-сигналы (reply и общий конкретный внешний источник) от этого
+    фильтра не зависят.
+    """
+    allowed = _continuity_message_tokens(message)
+    if not allowed:
+        return set()
+
+    text = re.sub(
+        r"https?://\S+",
+        " ",
+        str(message.get("text") or ""),
+        flags=re.IGNORECASE,
+    )
+    first_paragraph = re.split(
+        r"\n\s*\n",
+        text,
+        maxsplit=1,
+    )[0]
+    raw_tokens = re.findall(
+        r"[^\W_]+(?:['’-][^\W_]+)*",
+        unicodedata.normalize("NFKC", first_paragraph).casefold(),
+        flags=re.UNICODE,
+    )
+
+    lead_tokens = []
+    for token in raw_tokens:
+        normalized = normalize_search_token(token)
+        stem = search_stem_prefix(normalized)
+        if stem not in allowed:
+            continue
+        lead_tokens.append(stem)
+        if len(lead_tokens) >= CONTINUITY_EVENT_ANCHOR_LEAD_TOKENS:
+            break
+
+    pairs = set()
+    for left_index, left in enumerate(lead_tokens):
+        upper = min(
+            len(lead_tokens),
+            left_index + 1 + CONTINUITY_EVENT_ANCHOR_PAIR_WINDOW,
+        )
+        for right_index in range(left_index + 1, upper):
+            right = lead_tokens[right_index]
+            if left != right:
+                pairs.add(tuple(sorted((left, right))))
+    return pairs
+
+
+def _continuity_recurring_summary_day(message):
+    """
+    Возвращает календарный день только для явно периодической сводки в lead.
+
+    Это не общий стоп-лист: признак применяется лишь внутри pure lexical
+    event-anchor gate, чтобы соседние суточные отчёты одного канала не
+    превращались автоматически в один эпизод.
+    """
+    text = str(message.get("text") or "")
+    first_paragraph = re.split(
+        r"\n\s*\n",
+        text,
+        maxsplit=1,
+    )[0]
+    folded = unicodedata.normalize("NFKC", first_paragraph).casefold()
+    if not re.search(
+        r"(?:\bза\s+(?:добу|сутки)\b|\bсуточн\w*\s+сводк\w*\b)",
+        folded,
+        flags=re.UNICODE,
+    ):
+        return None
+
+    value = message.get("date_local") or message.get("date_utc")
+    parsed = parse_dt(value)
+    if not parsed:
+        return None
+    return parsed.date()
+
+
 def _continuity_specific_origin(message):
     origin = message.get("origin_key")
     if not isinstance(origin, str) or not origin:
@@ -4846,7 +4931,8 @@ def build_continuity_context(
     внешний источник тоже остаётся strong, но внутренняя ссылка на старый пост
     того же канала становится только дополнительным признаком и требует
     содержательного lexical_candidate. Чистая лексическая связь использует
-    только допустимые токены и более строгие пороги.
+    только допустимые токены, текущие пороги и редкий локальный event-anchor
+    в начале обоих сообщений.
     """
     current = [
         message
@@ -4877,6 +4963,7 @@ def build_continuity_context(
     prior_by_key = {}
     prior_tokens = {}
     prior_token_docs = {}
+    prior_anchor_pairs = {}
     origin_index = {}
     url_index = {}
     direct_index = {}
@@ -4901,10 +4988,16 @@ def build_continuity_context(
         for token in tokens:
             prior_token_docs.setdefault(token, set()).add(key)
 
+        prior_anchor_pairs[key] = _continuity_event_anchor_pairs(message)
+
     current_tokens_by_key = {}
+    current_anchor_pairs_by_key = {}
     token_document_frequency = Counter()
+    anchor_pair_document_frequency = Counter()
     for tokens in prior_tokens.values():
         token_document_frequency.update(tokens)
+    for pairs in prior_anchor_pairs.values():
+        anchor_pair_document_frequency.update(pairs)
 
     for message in current:
         key = message.get("message_key") or message_key(message)
@@ -4912,12 +5005,18 @@ def build_continuity_context(
         current_tokens_by_key[key] = tokens
         token_document_frequency.update(tokens)
 
+        anchor_pairs = _continuity_event_anchor_pairs(message)
+        current_anchor_pairs_by_key[key] = anchor_pairs
+        anchor_pair_document_frequency.update(anchor_pairs)
+
     document_count = max(
         1,
         len(prior_tokens) + len(current_tokens_by_key),
     )
     rare_limit = max(3, int(math.ceil(document_count * 0.03)))
     common_limit = max(8, int(math.ceil(document_count * 0.12)))
+    anchor_pair_limit = max(2, int(math.ceil(document_count * 0.01)))
+    anchor_token_limit = max(3, int(math.ceil(document_count * 0.015)))
 
     linked = {}
 
@@ -5089,6 +5188,37 @@ def build_continuity_context(
                 + overlap * 4.0
             )
             if lexical_score_value < 5.0:
+                continue
+
+            current_summary_day = _continuity_recurring_summary_day(
+                current_message
+            )
+            previous_summary_day = _continuity_recurring_summary_day(
+                previous
+            )
+            if (
+                same_channel
+                and current_summary_day is not None
+                and previous_summary_day is not None
+                and current_summary_day != previous_summary_day
+            ):
+                continue
+
+            shared_anchor_pairs = (
+                current_anchor_pairs_by_key.get(current_key, set())
+                & prior_anchor_pairs.get(prior_key, set())
+            )
+            has_event_anchor = any(
+                anchor_pair_document_frequency.get(pair, 0)
+                <= anchor_pair_limit
+                and min(
+                    token_document_frequency.get(pair[0], document_count),
+                    token_document_frequency.get(pair[1], document_count),
+                )
+                <= anchor_token_limit
+                for pair in shared_anchor_pairs
+            )
+            if not has_event_anchor:
                 continue
 
             mark(
