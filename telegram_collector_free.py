@@ -4613,6 +4613,35 @@ def _continuity_event_anchor_pairs(message):
     return pairs
 
 
+def _continuity_recurring_summary_day(message):
+    """
+    Возвращает календарный день только для явно периодической сводки в lead.
+
+    Это не общий стоп-лист: признак применяется лишь внутри pure lexical
+    event-anchor gate, чтобы соседние суточные отчёты одного канала не
+    превращались автоматически в один эпизод.
+    """
+    text = str(message.get("text") or "")
+    first_paragraph = re.split(
+        r"\n\s*\n",
+        text,
+        maxsplit=1,
+    )[0]
+    folded = unicodedata.normalize("NFKC", first_paragraph).casefold()
+    if not re.search(
+        r"(?:\bза\s+(?:добу|сутки)\b|\bсуточн\w*\s+сводк\w*\b)",
+        folded,
+        flags=re.UNICODE,
+    ):
+        return None
+
+    value = message.get("date_local") or message.get("date_utc")
+    parsed = parse_dt(value)
+    if not parsed:
+        return None
+    return parsed.date()
+
+
 def _continuity_specific_origin(message):
     origin = message.get("origin_key")
     if not isinstance(origin, str) or not origin:
@@ -5159,6 +5188,20 @@ def build_continuity_context(
                 + overlap * 4.0
             )
             if lexical_score_value < 5.0:
+                continue
+
+            current_summary_day = _continuity_recurring_summary_day(
+                current_message
+            )
+            previous_summary_day = _continuity_recurring_summary_day(
+                previous
+            )
+            if (
+                same_channel
+                and current_summary_day is not None
+                and previous_summary_day is not None
+                and current_summary_day != previous_summary_day
+            ):
                 continue
 
             shared_anchor_pairs = (
