@@ -1737,7 +1737,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_continuity_private_telegram_self_link_is_not_strong(self):
         shared_url = "https://t.me/c/1447182889/13821"
         prior = {
-            "channel_id": 1447182889,
+            "channel_id": -1001447182889,
             "channel": "Приватный канал",
             "message_id": 13840,
             "date_utc": "2026-09-20T08:00:00+00:00",
@@ -1746,7 +1746,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "origin_key": "url:" + shared_url,
         }
         current = {
-            "channel_id": 1447182889,
+            "channel_id": -1001447182889,
             "channel": "Приватный канал",
             "message_id": 13849,
             "date_utc": "2026-09-21T08:00:00+00:00",
