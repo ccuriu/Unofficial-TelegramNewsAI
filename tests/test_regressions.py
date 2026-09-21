@@ -2016,31 +2016,30 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
     def test_continuity_context_is_bounded_per_current_message(self):
+        source_url = "https://example.com/source/story"
         current = {
             "channel_id": 1,
             "channel": "Канал A",
             "message_id": 50,
             "date_utc": "2026-09-20T08:00:00+00:00",
-            "text": (
-                "Альфастрой завершила покупку Северного "
-                "машиностроительного завода после переговоров"
-            ),
+            "text": "Текущая публикация по общему первоисточнику",
+            "canonical_urls": [source_url],
+            "origin_key": "url:" + source_url,
         }
         prior = []
-        for message_id, day, suffix in (
-            (10, "17", "начались переговоры"),
-            (11, "18", "стороны согласовали условия"),
-            (12, "19", "подготовлены документы"),
+        for message_id, day in (
+            (10, "17"),
+            (11, "18"),
+            (12, "19"),
         ):
             prior.append({
-                "channel_id": 1,
-                "channel": "Канал A",
+                "channel_id": 2,
+                "channel": "Канал B",
                 "message_id": message_id,
                 "date_utc": f"2026-09-{day}T08:00:00+00:00",
-                "text": (
-                    "Альфастрой Северный машиностроительный завод "
-                    + suffix
-                ),
+                "text": f"Предыдущая публикация {message_id}",
+                "canonical_urls": [source_url],
+                "origin_key": "url:" + source_url,
             })
 
         context = collector.build_continuity_context(
@@ -2050,6 +2049,10 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(context["messages_count"], 2)
+        self.assertTrue(all(
+            item["related_current_message_refs"][0]["match_strength"] == "strong"
+            for item in context["messages"]
+        ))
 
     def test_digest_exports_continuity_context_separately_from_current_period(self):
         channels = [{"id": 10, "name": "A", "username": "a"}]
