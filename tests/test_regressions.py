@@ -2103,51 +2103,32 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_continuity_event_anchor_does_not_merge_recurring_daily_regional_briefings(self):
         prior = {
-            "channel_id": 1,
-            "channel": "Регион",
+            "channel_id": 1395451700,
+            "channel": "Харьков life | Харків",
+            "username": "kharkivlife",
             "message_id": 10,
-            "date_utc": "2026-09-20T06:00:00+00:00",
+            "date_utc": "2026-09-20T05:45:35+00:00",
             "text": (
-                "Суточная сводка по Харьковской области за 20 сентября.\n\n"
-                "За сутки удары затронули населенные пункты, повреждены дома "
-                "и инфраструктура, сообщают областные власти."
+                "Харківщина: за добу постраждали 4 людини\n\n"
+                "Ворожих ударів зазнали Харків та 10 населених пунктів області. "
+                "Пошкоджені будинки, автомобілі, енергомережі та склад."
             ),
         }
         next_day = {
-            "channel_id": 1,
-            "channel": "Регион",
+            "channel_id": 1395451700,
+            "channel": "Харьков life | Харків",
+            "username": "kharkivlife",
             "message_id": 11,
-            "date_utc": "2026-09-21T06:00:00+00:00",
+            "date_utc": "2026-09-21T06:00:53+00:00",
             "text": (
-                "Суточная сводка по Харьковской области за 21 сентября.\n\n"
-                "За сутки новые удары затронули населенные пункты, повреждены дома "
-                "и инфраструктура, сообщают областные власти."
+                "Харківщина: за добу постраждали 8 людей\n\n"
+                "Ворожих ударів зазнали Харків та 18 населених пунктів області. "
+                "Пошкоджені будинки, автомобілі, електромережі та залізнична інфраструктура."
             ),
         }
-        background = []
-        for offset in range(10):
-            background.append({
-                "channel_id": 20 + offset,
-                "channel": f"Региональный фон {offset}",
-                "message_id": 100 + offset,
-                "date_utc": f"2026-09-21T{7 + offset:02d}:00:00+00:00",
-                "text": (
-                    "Суточная сводка по Харьковской области.\n\n"
-                    f"Отдельная тема района uniqueplace{offset}"
-                ),
-            })
 
-        context = collector.build_continuity_context(
-            [next_day, *background],
-            [prior],
-        )
-        refs = {
-            ref["message_ref"]["message_id"]
-            for item in context["messages"]
-            for ref in item["related_current_message_refs"]
-            if item["context_message"]["message_id"] == 10
-        }
-        self.assertNotIn(11, refs)
+        context = collector.build_continuity_context([next_day], [prior])
+        self.assertEqual(context["messages_count"], 0)
 
     def test_continuity_event_anchor_keeps_conversion_center_reprints_but_rejects_other_crypto_fraud(self):
         prior = {
