@@ -1734,6 +1734,30 @@ class OfflineRegressionTests(unittest.TestCase):
         context = collector.build_continuity_context([current], [prior])
         self.assertEqual(context["messages_count"], 0)
 
+    def test_continuity_private_telegram_self_link_is_not_strong(self):
+        shared_url = "https://t.me/c/1447182889/13821"
+        prior = {
+            "channel_id": 1447182889,
+            "channel": "Приватный канал",
+            "message_id": 13840,
+            "date_utc": "2026-09-20T08:00:00+00:00",
+            "text": "Материал о поставках медицинского оборудования",
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+        current = {
+            "channel_id": 1447182889,
+            "channel": "Приватный канал",
+            "message_id": 13849,
+            "date_utc": "2026-09-21T08:00:00+00:00",
+            "text": "Совершенно отдельный материал о космической миссии",
+            "canonical_urls": [shared_url],
+            "origin_key": "url:" + shared_url,
+        }
+
+        context = collector.build_continuity_context([current], [prior])
+        self.assertEqual(context["messages_count"], 0)
+
     def test_continuity_second_real_self_link_pattern_is_not_strong(self):
         shared_url = "https://t.me/MediaKiller2021/24689"
         prior = {
