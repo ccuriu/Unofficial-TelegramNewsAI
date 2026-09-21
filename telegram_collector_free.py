@@ -4619,6 +4619,35 @@ def _continuity_url_owner_name(url):
     return None
 
 
+def _continuity_url_owner_channel_id(url):
+    """
+    Для приватных Telegram-ссылок t.me/c/<channel_id>/<message_id>
+    username недоступен, но внутренний id канала присутствует в URL.
+    """
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url.strip())
+    except Exception:
+        return None
+
+    host = (parts.hostname or "").lower()
+    segments = [
+        segment
+        for segment in (parts.path or "").strip("/").split("/")
+        if segment
+    ]
+    if (
+        host in {"t.me", "telegram.me"}
+        and len(segments) >= 3
+        and segments[0].lower() == "c"
+        and segments[1].isdigit()
+        and segments[-1].isdigit()
+    ):
+        return int(segments[1])
+    return None
+
+
 def _continuity_message_public_names(message):
     names = set()
     username = str(message.get("username") or "").lstrip("@").casefold()
@@ -4652,6 +4681,22 @@ def _continuity_is_same_channel_self_link(current_message, previous_message, url
     """
     if not _continuity_same_channel(current_message, previous_message):
         return False
+
+    owner_channel_id = _continuity_url_owner_channel_id(url)
+    if owner_channel_id is not None:
+        message_channel_id = abs(
+            int(current_message.get("channel_id") or 0)
+        )
+        comparable_channel_ids = {message_channel_id}
+        # В некоторых представлениях peer id канала содержит префикс -100,
+        # тогда как t.me/c хранит только собственно channel_id.
+        channel_id_text = str(message_channel_id)
+        if channel_id_text.startswith("100") and len(channel_id_text) > 3:
+            comparable_channel_ids.add(int(channel_id_text[3:]))
+        return bool(
+            message_channel_id
+            and owner_channel_id in comparable_channel_ids
+        )
 
     owner = _continuity_url_owner_name(url)
     if not owner:
