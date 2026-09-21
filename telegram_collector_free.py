@@ -4684,10 +4684,18 @@ def _continuity_is_same_channel_self_link(current_message, previous_message, url
 
     owner_channel_id = _continuity_url_owner_channel_id(url)
     if owner_channel_id is not None:
-        message_channel_id = int(current_message.get("channel_id") or 0)
+        message_channel_id = abs(
+            int(current_message.get("channel_id") or 0)
+        )
+        comparable_channel_ids = {message_channel_id}
+        # В некоторых представлениях peer id канала содержит префикс -100,
+        # тогда как t.me/c хранит только собственно channel_id.
+        channel_id_text = str(message_channel_id)
+        if channel_id_text.startswith("100") and len(channel_id_text) > 3:
+            comparable_channel_ids.add(int(channel_id_text[3:]))
         return bool(
             message_channel_id
-            and owner_channel_id == abs(message_channel_id)
+            and owner_channel_id in comparable_channel_ids
         )
 
     owner = _continuity_url_owner_name(url)
