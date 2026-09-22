@@ -3564,10 +3564,336 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.4")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.5")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
+
+
+    def _candidate_message(
+        self,
+        channel_id,
+        message_id,
+        minute,
+        text,
+        *,
+        channel=None,
+        username=None,
+        **extra,
+    ):
+        username = username or f"channel_{channel_id}"
+        result = {
+            "channel_id": channel_id,
+            "message_id": message_id,
+            "message_key": f"{channel_id}:{message_id}",
+            "date_local": f"2026-09-22T10:{minute:02d}:00+03:00",
+            "channel": channel or f"Channel {channel_id}",
+            "username": username,
+            "telegram_url": f"https://t.me/{username}/{message_id}",
+            "text": text,
+        }
+        result.update(extra)
+        return result
+
+    def test_event_candidate_singleton_is_never_lost(self):
+        message = self._candidate_message(
+            1, 1, 10, "Unique cobalt observatory report."
+        )
+        layer = collector.build_event_candidates([message])
+        self.assertEqual(layer["coverage"]["input_current_messages"], 1)
+        self.assertEqual(layer["coverage"]["event_candidates"], 1)
+        self.assertEqual(layer["coverage"]["singleton_candidates"], 1)
+        self.assertEqual(
+            layer["candidates"][0]["member_refs"][0]["message_key"],
+            "1:1",
+        )
+        self.assertEqual(layer["candidates"][0]["relation"], "singleton")
+
+    def test_event_candidate_assigns_every_current_message_exactly_once(self):
+        messages = [
+            self._candidate_message(1, 1, 10, "Amber archive notice alpha."),
+            self._candidate_message(2, 2, 20, "Cobalt registry notice beta."),
+            self._candidate_message(3, 3, 30, "Indigo terminal notice gamma."),
+        ]
+        layer = collector.build_event_candidates(messages)
+        refs = [
+            ref["message_key"]
+            for candidate in layer["candidates"]
+            for ref in candidate["member_refs"]
+        ]
+        self.assertEqual(sorted(refs), ["1:1", "2:2", "3:3"])
+        self.assertEqual(len(refs), len(set(refs)))
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+
+    def test_event_candidate_common_forward_is_strong_group(self):
+        messages = [
+            self._candidate_message(
+                1, 1, 10, "First wording from a forwarded bulletin.",
+                origin_key="telegram_forward:777:42",
+            ),
+            self._candidate_message(
+                2, 2, 20, "Second wording from the same forwarded bulletin.",
+                origin_key="telegram_forward:777:42",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(layer["candidates"][0]["relation"], "strong_source")
+        self.assertIn(
+            "telegram_forward_origin",
+            layer["candidates"][0]["relation_reasons"],
+        )
+
+    def test_event_candidate_exact_article_source_is_strong_across_channels(self):
+        article = "https://example.com/news/material-4242"
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                10,
+                "One channel references a concrete external material.",
+                canonical_urls=[article],
+            ),
+            self._candidate_message(
+                2,
+                2,
+                20,
+                "Another channel references the same concrete material.",
+                canonical_urls=[article],
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(layer["candidates"][0]["relation"], "strong_source")
+        self.assertIn(
+            "same_specific_external_source",
+            layer["candidates"][0]["relation_reasons"],
+        )
+
+    def test_event_candidate_near_duplicates_keep_one_full_evidence_and_supporting_ref(self):
+        older = self._candidate_message(
+            1, 1, 10, "Nearly identical bulletin text retained once."
+        )
+        newer = self._candidate_message(
+            2,
+            2,
+            20,
+            "Nearly identical bulletin text retained once!",
+            similar_message_refs=["1:1"],
+        )
+        layer = collector.build_event_candidates([older, newer])
+        candidate = layer["candidates"][0]
+        self.assertEqual(candidate["messages_count"], 2)
+        self.assertEqual(len(candidate["evidence_messages"]), 1)
+        self.assertEqual(len(candidate["supporting_refs"]), 1)
+        self.assertEqual(
+            candidate["evidence_messages"][0]["message_key"],
+            "2:2",
+        )
+        self.assertEqual(
+            candidate["supporting_refs"][0]["message_key"],
+            "1:1",
+        )
+        self.assertEqual(
+            candidate["supporting_refs"][0]["retained_as"],
+            "2:2",
+        )
+        self.assertEqual(
+            layer["coverage"]["near_duplicate_supporting_refs"],
+            1,
+        )
+
+    def test_event_candidate_lexical_anchor_can_join_obvious_episode_continuation(self):
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                20,
+                "Quasar reactor chamber pressure collapse inspection continues.",
+            ),
+            self._candidate_message(
+                1,
+                2,
+                10,
+                "Quasar reactor chamber pressure collapse inspection started.",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(
+            layer["candidates"][0]["relation"],
+            "lexical_candidate",
+        )
+
+    def test_event_candidate_broad_common_topic_does_not_merge(self):
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                20,
+                "Meridian corporation opened robotics laboratory in Tallinn.",
+            ),
+            self._candidate_message(
+                1,
+                2,
+                10,
+                "Meridian corporation announced dividend policy for shareholders.",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 2)
+
+    def test_event_candidate_lexical_chain_does_not_transitively_bridge(self):
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                30,
+                "Amber falcon harbor closure inspection continues.",
+            ),
+            self._candidate_message(
+                1,
+                2,
+                20,
+                "Amber falcon harbor closure inspection cobalt runway reopening.",
+            ),
+            self._candidate_message(
+                1,
+                3,
+                10,
+                "Cobalt runway reopening weather review continues.",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        sizes = sorted(
+            candidate["messages_count"]
+            for candidate in layer["candidates"]
+        )
+        self.assertEqual(sizes, [1, 2])
+        first_candidate_keys = {
+            ref["message_key"]
+            for ref in layer["candidates"][0]["member_refs"]
+        }
+        self.assertEqual(first_candidate_keys, {"1:1", "1:2"})
+        self.assertNotIn("1:3", first_candidate_keys)
+
+    def test_event_candidate_two_events_of_same_organization_do_not_merge(self):
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                20,
+                "Atlas foundation opened coastal archive in Lisbon.",
+            ),
+            self._candidate_message(
+                1,
+                2,
+                10,
+                "Atlas foundation appointed finance director in Warsaw.",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 2)
+
+    def test_event_candidate_ru_en_without_strong_relation_do_not_force_merge(self):
+        messages = [
+            self._candidate_message(
+                1,
+                1,
+                20,
+                "Станция сообщила о завершении ремонта северного терминала.",
+            ),
+            self._candidate_message(
+                2,
+                2,
+                10,
+                "The station announced a new research grant for marine biology.",
+            ),
+        ]
+        layer = collector.build_event_candidates(messages)
+        self.assertEqual(len(layer["candidates"]), 2)
+
+    def test_event_candidate_literal_source_urls_survive_candidate_export(self):
+        first = self._candidate_message(
+            1,
+            1,
+            10,
+            "Literal source alpha remains.",
+        )
+        second = self._candidate_message(
+            2,
+            2,
+            20,
+            "Literal source beta remains.",
+            similar_message_refs=["1:1"],
+        )
+        second["telegram_url"] = "https://t.me/channel_2/2?x=KeepCase"
+        payload = {
+            "meta": {},
+            "news_messages": [first, second],
+            "operational_messages": [],
+            "continuity_context": {"messages": []},
+            "changes_since_previous_digest": {"outside_period_changes": []},
+        }
+        rendered = collector.render_ai_friendly_markdown(payload)
+        self.assertIn("https://t.me/channel_1/1", rendered)
+        self.assertIn("https://t.me/channel_2/2?x=KeepCase", rendered)
+        self.assertIn("SUPPORTING_REFS:", rendered)
+
+    def test_event_candidate_order_is_newest_activity_first(self):
+        older = self._candidate_message(
+            1, 1, 10, "Older independent candidate."
+        )
+        newer = self._candidate_message(
+            2, 2, 30, "Newer independent candidate."
+        )
+        layer = collector.build_event_candidates([older, newer])
+        self.assertEqual(
+            layer["candidates"][0]["member_refs"][0]["message_key"],
+            "2:2",
+        )
+        self.assertEqual(
+            layer["candidates"][1]["member_refs"][0]["message_key"],
+            "1:1",
+        )
+
+    def test_candidate_renderer_does_not_mutate_canonical_payload(self):
+        payload = {
+            "meta": {"digest_profile_version": "8.2"},
+            "news_messages": [
+                self._candidate_message(
+                    1, 1, 10, "Immutable canonical payload message."
+                )
+            ],
+            "operational_messages": [],
+            "continuity_context": {"messages": []},
+            "changes_since_previous_digest": {"outside_period_changes": []},
+        }
+        before = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        collector.render_ai_friendly_markdown(payload)
+        after = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        self.assertEqual(after, before)
+
+    def test_candidate_renderer_uses_current_profile_for_saved_canonical(self):
+        payload = {
+            "meta": {
+                "digest_profile_version": "8.2",
+                "recommended_digest_request": "old saved request",
+            },
+            "news_messages": [
+                self._candidate_message(
+                    1, 1, 10, "Saved canonical can be re-rendered."
+                )
+            ],
+            "operational_messages": [],
+            "continuity_context": {"messages": []},
+            "changes_since_previous_digest": {"outside_period_changes": []},
+        }
+        rendered = collector.render_ai_friendly_markdown(payload)
+        self.assertIn("DIGEST_PROFILE: 8.5", rendered)
+        self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
+        self.assertNotIn("old saved request", rendered)
 
     def test_ai_markdown_is_newest_first_and_omits_textless_media_only(self):
         payload = {
@@ -3616,7 +3942,10 @@ class OfflineRegressionTests(unittest.TestCase):
 
         rendered = collector.render_ai_friendly_markdown(payload)
 
-        self.assertIn("CURRENT_MESSAGES: 2", rendered)
+        self.assertIn("INPUT_CURRENT_MESSAGES: 2", rendered)
+        self.assertIn("EVENT_CANDIDATES: 2", rendered)
+        self.assertIn("UNASSIGNED_MESSAGES: 0", rendered)
+        self.assertIn("DUPLICATE_ASSIGNMENTS: 0", rendered)
         self.assertIn("OMITTED_MEDIA_ONLY: 1", rendered)
         self.assertIn(
             "LOCAL_INTERVAL: 2026-09-22T10:00:00+03:00 — "
