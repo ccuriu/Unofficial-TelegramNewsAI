@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.2"
+DIGEST_PROFILE_VERSION = "8.3"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -63,6 +63,7 @@ RAW_DIR = ARCHIVE_DIR / "Сырые"
 LOG_DIR = APP_DIR / "logs"
 
 LATEST_FILE = OUTPUT_DIR / "ДАЙДЖЕСТ_ПОСЛЕДНИЙ.json"
+AI_LATEST_FILE = OUTPUT_DIR / "ДАЙДЖЕСТ_ДЛЯ_ИИ.md"
 SEARCH_LATEST_FILE = OUTPUT_DIR / "ПОИСК_ПОСЛЕДНИЙ.json"
 SEARCH_ARCHIVE_DIR = ARCHIVE_DIR / "Поиск"
 
@@ -2025,11 +2026,63 @@ def normalize_external_urls(urls):
     )
 
 
+GENERIC_SHARED_SOURCE_ROUTES = {
+    "about",
+    "author",
+    "authors",
+    "bot",
+    "bots",
+    "category",
+    "categories",
+    "contact",
+    "contacts",
+    "download",
+    "downloads",
+    "feed",
+    "join",
+    "login",
+    "privacy",
+    "profile",
+    "profiles",
+    "promo",
+    "redirect",
+    "register",
+    "rss",
+    "search",
+    "signin",
+    "signup",
+    "subscribe",
+    "subscription",
+    "subscriptions",
+    "tag",
+    "tags",
+    "terms",
+}
+
+
+def _looks_like_specific_material_segment(segment):
+    value = str(segment or "").strip().casefold()
+    if not value or value in GENERIC_SHARED_SOURCE_ROUTES:
+        return False
+
+    # Для related groups нужен консервативный признак конкретного материала,
+    # а не просто любой path/query. Даты, идентификаторы и длинные slug-и
+    # обычно дают такой признак без привязки к конкретному сайту.
+    if any(char.isdigit() for char in value):
+        return True
+    if ("-" in value or "_" in value) and len(value) >= 8:
+        return True
+    if len(value) >= 18 and value.isalnum():
+        return True
+    return False
+
+
 def is_specific_shared_source_url(url):
     """
-    Общая ссылка полезна как признак общего источника только когда она ведёт
-    на конкретный материал. Главная страница, профиль, канал или постоянная
-    служебная ссылка слишком слабы и могут ошибочно связать разные события.
+    True только для достаточно конкретной публикации/документа.
+
+    Related groups — подсказка, поэтому лучше пропустить слабую связь, чем
+    объединить разные события постоянной promo/profile/service URL.
     """
     if not isinstance(url, str):
         return False
@@ -2053,17 +2106,27 @@ def is_specific_shared_source_url(url):
     if host in {"t.me", "telegram.me"}:
         return len(segments) >= 2 and segments[-1].isdigit()
 
-    # У MAX односегментный путь max.ru/<name> — это профиль/канал,
-    # а не конкретный пост. Ссылки-приглашения тоже относятся к каналу.
-    # Конкретные публикации имеют дополнительный идентификатор в пути.
+    # У MAX односегментный путь max.ru/<name> — профиль/канал.
     if host == "max.ru":
         if len(segments) < 2:
             return False
-        if segments[0].lower() in {"join", "joinchannel"}:
+        if segments[0].casefold() in {"join", "joinchannel"}:
             return False
-        return True
+        return _looks_like_specific_material_segment(segments[-1])
 
-    return bool(path or parts.query)
+    # Query сам по себе не делает ссылку конкретным материалом:
+    # именно так постоянные app/deep-link redirect URL связывали десятки
+    # разных новостей в RUN 1.
+    if not segments:
+        return False
+
+    if segments[0].casefold() in GENERIC_SHARED_SOURCE_ROUTES:
+        return False
+
+    return any(
+        _looks_like_specific_material_segment(segment)
+        for segment in segments[-2:]
+    )
 
 
 def make_origin_key(forwarded_from, canonical_urls):
@@ -4561,9 +4624,12 @@ async def prefill_full_history(
 
 def build_related_groups(messages):
     """
-    Связывает разные посты, которые ведут на один источник
-    или являются пересылкой одного Telegram-поста.
-    Тексты не удаляются: это именно группировка, а не дедупликация.
+    Связывает сообщения только по сильным origin/source признакам.
+
+    Telegram forward origin остаётся сильным признаком сам по себе.
+    Внешняя URL используется консервативно: она должна выглядеть как
+    конкретный материал, встречаться в разных каналах и не повторяться
+    внутри одного канала. Это не event clustering и не дедупликация.
     """
     parent = {}
     key_to_message = {}
@@ -4572,12 +4638,11 @@ def build_related_groups(messages):
         key = message_key(message)
         parent[key] = key
         key_to_message[key] = message
+        message.pop("related_group_id", None)
 
     def find(x):
         while parent[x] != x:
-            parent[x] = parent[
-                parent[x]
-            ]
+            parent[x] = parent[parent[x]]
             x = parent[x]
         return x
 
@@ -4587,55 +4652,74 @@ def build_related_groups(messages):
         if ra != rb:
             parent[rb] = ra
 
-    buckets = {}
+    forward_buckets = {}
+    url_buckets = {}
+
+    def add(bucket, relation, key):
+        bucket.setdefault(relation, [])
+        if key not in bucket[relation]:
+            bucket[relation].append(key)
 
     for message in messages:
         key = message_key(message)
-        relation_keys = []
+        origin_key = message.get("origin_key")
 
-        origin_key = message.get(
-            "origin_key"
-        )
-        if origin_key:
-            use_origin_key = True
-            if origin_key.startswith("url:"):
-                use_origin_key = is_specific_shared_source_url(
-                    origin_key[4:]
-                )
-            if use_origin_key:
-                relation_keys.append(
-                    "origin:" + origin_key
-                )
+        if isinstance(origin_key, str):
+            if origin_key.startswith("telegram_forward:"):
+                add(forward_buckets, origin_key, key)
+            elif origin_key.startswith("url:"):
+                url = origin_key[4:]
+                if is_specific_shared_source_url(url):
+                    add(url_buckets, url, key)
 
-        for url in message.get(
-            "canonical_urls",
-            [],
-        ):
+        for url in message.get("canonical_urls", []) or []:
             if is_specific_shared_source_url(url):
-                relation_keys.append(
-                    "url:" + url
-                )
+                add(url_buckets, url, key)
 
-        for relation_key in relation_keys:
-            previous_key = buckets.get(
-                relation_key
+    # Точная пересылка одного Telegram-поста — сильный origin.
+    for keys in forward_buckets.values():
+        if len(keys) < 2:
+            continue
+        first = keys[0]
+        for key in keys[1:]:
+            union(first, key)
+
+    # Внешняя URL — более слабый сигнал. Одинаковая ссылка внутри одного
+    # канала часто оказывается постоянным promo/service элементом, поэтому
+    # не должна связывать публикации без дополнительного сильного признака.
+    for keys in url_buckets.values():
+        if len(keys) < 2:
+            continue
+
+        channel_keys = []
+        repeated_within_channel = False
+        seen_channels = set()
+
+        for key in keys:
+            message = key_to_message[key]
+            channel_identity = (
+                message.get("channel_id"),
+                message.get("username"),
+                message.get("channel"),
             )
+            if channel_identity in seen_channels:
+                repeated_within_channel = True
+                break
+            seen_channels.add(channel_identity)
+            channel_keys.append(key)
 
-            if previous_key:
-                union(key, previous_key)
-            else:
-                buckets[
-                    relation_key
-                ] = key
+        if repeated_within_channel or len(seen_channels) < 2:
+            continue
+
+        first = channel_keys[0]
+        for key in channel_keys[1:]:
+            union(first, key)
 
     groups = {}
 
     for key in parent:
         root = find(key)
-        groups.setdefault(
-            root,
-            [],
-        ).append(key)
+        groups.setdefault(root, []).append(key)
 
     output = []
     group_index = 1
@@ -4644,10 +4728,7 @@ def build_related_groups(messages):
         if len(keys) < 2:
             continue
 
-        members = [
-            key_to_message[key]
-            for key in keys
-        ]
+        members = [key_to_message[key] for key in keys]
 
         channels = unique_keep_order(
             m.get("channel")
@@ -4657,10 +4738,7 @@ def build_related_groups(messages):
         canonical_urls = unique_keep_order(
             url
             for m in members
-            for url in m.get(
-                "canonical_urls",
-                [],
-            )
+            for url in m.get("canonical_urls", [])
         )
 
         origin_keys = unique_keep_order(
@@ -4669,15 +4747,11 @@ def build_related_groups(messages):
             if m.get("origin_key")
         )
 
-        group_id = (
-            f"related_{group_index:04d}"
-        )
+        group_id = f"related_{group_index:04d}"
         group_index += 1
 
         for message in members:
-            message[
-                "related_group_id"
-            ] = group_id
+            message["related_group_id"] = group_id
 
         output.append({
             "group_id": group_id,
@@ -4686,15 +4760,10 @@ def build_related_groups(messages):
                     "message_key": message_key(m),
                     "channel": m.get("channel"),
                     "username": m.get("username"),
-                    "message_id": m.get(
-                        "message_id"
-                    ),
-                    "channel_url": m.get(
-                        "channel_url"
-                    ) or public_channel_link(m.get("username")),
-                    "telegram_url": m.get(
-                        "telegram_url"
-                    ),
+                    "message_id": m.get("message_id"),
+                    "channel_url": m.get("channel_url")
+                    or public_channel_link(m.get("username")),
+                    "telegram_url": m.get("telegram_url"),
                 }
                 for m in members
             ],
@@ -4702,14 +4771,12 @@ def build_related_groups(messages):
             "canonical_urls": canonical_urls,
             "origin_keys": origin_keys,
             "note": (
-                "Сообщения связаны общим исходным Telegram-постом "
-                "или одной канонической внешней ссылкой. "
-                "Разные формулировки сохранены отдельно."
+                "Подсказка о возможном общем конкретном источнике. "
+                "Она не доказывает, что сообщения описывают одно событие."
             ),
         })
 
     return output
-
 
 
 
@@ -5542,6 +5609,10 @@ def split_operational(
 # ============================================================
 
 EDITORIAL_PRINCIPLES = (
+    "Сначала учти весь набор текущих сообщений, а уже затем отбирай форму подачи. Не заканчивай дайджест после нескольких самых "
+    "заметных историй. Каждый самостоятельный содержательно значимый сюжет должен либо быть раскрыт, либо попасть в компактный "
+    "блок «Коротко». Насыщенный день может и должен давать более длинный дайджест: полнота важной повестки важнее искусственной "
+    "краткости. Одиночное важное сообщение нельзя терять только потому, что его не повторили другие каналы. "
     "Всегда игнорируй сведения о пользователе, персональную память и историю текущего и прошлых чатов: они не источник фактов и "
     "не должны влиять на отбор, порядок, акценты или оценку полезности материала. Не пиши «для вас», «вам особенно важно» и "
     "подобные персональные оценки. Тематика заранее неизвестна: определяй темы и глубину по фактическому материалу, без фиксированных "
@@ -5554,27 +5625,30 @@ EDITORIAL_PRINCIPLES = (
     "Расходящиеся версии сопоставляй по совпадающим и спорным деталям; какая версия лучше подкреплена независимыми данными, указывай "
     "только когда это следует из материала. Перепечатки одного исходного сообщения не считай независимыми подтверждениями. "
     "similar_message_refs и близость формулировок — лишь подсказка для сопоставления: это не доказательство одного события, факта "
-    "или подтверждения. Не достраивай отсутствующие факты, включая автора действия, мотив, цель и причинность. Контекст или вывод "
-    "добавляй только когда он следует из материала и нужен для понимания; если факты самодостаточны, не дописывай обязательную "
-    "аналитику и не ранжируй событие без опоры на материал. Внешние источники используй точечно для первоисточника, документа, "
-    "точной цифры или необходимого контекста. Служебные поля используй только для сопоставления; в готовом ответе технический "
-    "процесс не показывай. Не обсуждай файл, JSON, локальную базу, синхронизацию, дедупликацию или алгоритм поиска. Пиши плотно и "
-    "профессионально; сохраняй имена, даты, числа и степень уверенности. Пиши на языке запроса пользователя; если язык запроса "
-    "не указан или неясен, пиши по-русски. Иноязычные публикации переводи по смыслу, сохраняя имена, числа, цитируемые факты и "
-    "ссылки. Не разделяй источники по языку: русско-, украино- и англоязычные сообщения объединяй в один сюжет. Заголовки делай "
-    "короткими и не сильнее данных. Охвати значимые сюжеты; второстепенное собери компактно. "
+    "или подтверждения. Не используй общие знания модели для «улучшения» новости. Не добавляй существенные факты, географию, "
+    "участников, мотивы, последствия или причинность, которых нет в переданном материале. Если данных для вывода недостаточно, "
+    "прямо скажи, что это неясно. Контекст или вывод добавляй только когда он следует из материала и нужен для понимания; если "
+    "факты самодостаточны, не дописывай обязательную аналитику и не ранжируй событие без опоры на материал. Внешние источники "
+    "используй точечно для первоисточника, документа, точной цифры или необходимого контекста. Служебные поля используй только "
+    "для сопоставления; в готовом ответе технический процесс не показывай. Не обсуждай файл, JSON, локальную базу, синхронизацию, "
+    "дедупликацию или алгоритм поиска. Пиши плотно и профессионально; сохраняй имена, даты, числа и степень уверенности. Пиши на "
+    "языке запроса пользователя; если язык запроса не указан или неясен, пиши по-русски. Иноязычные публикации переводи по смыслу, "
+    "сохраняя имена, числа, цитируемые факты и ссылки. Не разделяй источники по языку: русско-, украино- и англоязычные сообщения "
+    "одного события объединяй в один сюжет. Заголовки делай короткими и не сильнее данных. "
 )
 
 
 SOURCE_RULES = (
-    "Каждый самостоятельный фактический сюжет должен завершаться строкой источника, если доступен telegram_url или channel_url. "
-    "Строка источника должна быть последней строкой сюжета: после неё не добавляй новых фактических утверждений. Если под одним "
-    "заголовком объединены факты из разных публикаций, финальная строка источников должна покрывать все существенные "
+    "Каждый самостоятельный фактический сюжет должен завершаться строкой источника, если доступен SOURCE_URL, telegram_url или "
+    "channel_url. Строка источника должна быть последней строкой сюжета: после неё не добавляй новых фактических утверждений. Если "
+    "под одним заголовком объединены факты из разных публикаций, финальная строка источников должна покрывать все существенные "
     "утверждения; иначе раздели материал на отдельные сюжеты или пункты с собственными источниками. В блоке несвязанных коротких "
     "событий ставь источник непосредственно после каждого события и не собирай общий список ссылок в конце блока. Пункты "
-    "«Главное за период» могут не дублировать ссылки, если эти сюжеты ниже имеют источники. При наличии telegram_url "
-    "название канала делай единственной Markdown-ссылкой на конкретный пост; иначе используй channel_url, а при отсутствии обеих "
-    "ссылок — обычное название. URL не придумывай. Для простого сюжета обычно достаточно одного содержательного источника; для "
+    "«Главное за период» могут не дублировать ссылки, если эти сюжеты ниже имеют источники. При наличии SOURCE_URL или telegram_url "
+    "название канала делай единственной Markdown-ссылкой на конкретный пост; иначе используй channel_url, а при отсутствии ссылок — "
+    "обычное название. Значение SOURCE_URL/telegram_url копируй ДОСЛОВНО, без нормализации и переписывания. Запрещено придумывать "
+    "URL, заменять t.me ссылку поисковой ссылкой или Google/другим redirect, а также «исправлять» URL по памяти. Если есть сомнение, "
+    "выведи исходную literal URL из материала. Для простого сюжета обычно достаточно одного содержательного источника; для "
     "составного используй 2–3 ключевые ссылки и не выдавай одну ссылку за подтверждение фактов, которых в ней нет. Не перечисляй "
     "одинаковые перепечатки. Формат: **Источник:** [Канал](url) или **Источники:** [Канал A](url) · [Канал B](url). "
 )
@@ -5589,16 +5663,18 @@ DIGEST_REQUEST = (
     "outside_period_changes — изменения вне периода; используй их только для развития сюжета или «Что изменилось» и не расширяй "
     "ими основной временной интервал. Если changes_since_previous_digest.comparison_available=true, используй его для определения "
     "новых и содержательно изменённых публикаций. Сообщения предыдущего выпуска не исключай из основного дайджеста, если они нужны "
-    "для полной картины периода. Изменение только метрик новой новостью не считай. related_message_groups используй для распознавания "
-    "перепечаток и общего источника, сохраняя содержательные различия. "
+    "для полной картины периода. Изменение только метрик новой новостью не считай. related_message_groups — только подсказка о "
+    "возможном общем источнике, а не приказ объединять сообщения в одно событие; всегда сверяй содержание и сохраняй различия. "
     + EDITORIAL_PRINCIPLES +
     SOURCE_RULES +
     "В заголовке укажи дату и фактический локальный интервал всего охваченного материала по date_local, а не только сообщений "
     "из блока сравнения; если надёжно определить интервал нельзя, не придумывай. При насыщенном материале после заголовка сразу "
     "переходи к «Главное за период» из нескольких коротких пунктов; "
     "не ставь перед ним второй абзац с тем же резюме. Если важных событий мало, этот блок не нужен. Затем раскрой сюжеты по "
-    "важности или естественной хронологии; глубину определяй количеством реально новой информации, обычно 1–3 компактными абзацами. "
-    "Однотипные оперативные предупреждения одного сюжета объединяй. Если последствия не подтверждены, сохраняй неопределённость. "
+    "важности или естественной хронологии; глубину каждого сюжета определяй количеством реально новой информации, обычно 1–3 "
+    "компактными абзацами, но не ограничивай этим число сюжетов. Содержательно значимые события, которым не нужен отдельный разбор, "
+    "собери в «Коротко» вместо того, чтобы опустить их. Однотипные оперативные предупреждения одного сюжета объединяй. Если "
+    "последствия не подтверждены, сохраняй неопределённость. "
     "После «Главное за период» не добавляй повторный итог, личный выбор или рейтинг. «Что изменилось» не заменяет основной дайджест "
     "и добавляется только при доступном сравнении и существенных изменениях. Не объясняй читателю внутренние правила охвата и "
     "сравнения: молча применяй полный период основного выпуска и дополнительную роль блока изменений, не комментируя их в готовом "
@@ -5739,6 +5815,205 @@ def prepare_message_for_ai(message):
 
     compact(result)
     return result
+
+
+
+def _ai_material_external_urls(message):
+    """
+    Сохраняет исходные URL конкретных материалов, но не постоянные
+    profile/promo/service ссылки. URL не нормализуются в пользовательском файле.
+    """
+    result = []
+    source_url = message.get("telegram_url")
+    channel_url = message.get("channel_url")
+
+    for raw_url in message.get("external_urls", []) or []:
+        if not isinstance(raw_url, str):
+            continue
+        raw_url = raw_url.strip()
+        if not raw_url or raw_url in {source_url, channel_url}:
+            continue
+        normalized = normalize_external_url(raw_url)
+        if normalized and is_specific_shared_source_url(normalized):
+            result.append(raw_url)
+
+    return unique_keep_order(result)
+
+
+def _ai_message_block(message, label="MESSAGE", related_current_refs=None):
+    key = message.get("message_key") or message_key(message)
+    text = str(message.get("text") or "").strip()
+    lines = [
+        "---",
+        f"[{label} {key}]",
+        f"DATE_LOCAL: {message.get('date_local') or message.get('date_utc') or ''}",
+        f"CHANNEL: {message.get('channel') or ''}",
+    ]
+
+    username = message.get("username")
+    if username:
+        lines.append(f"USERNAME: @{username}")
+
+    telegram_url = message.get("telegram_url")
+    if telegram_url:
+        lines.append(f"SOURCE_URL: {telegram_url}")
+
+    related_group_id = message.get("related_group_id")
+    if related_group_id:
+        lines.append(f"RELATED_HINT: {related_group_id}")
+
+    reply_to = message.get("reply_to_message_id")
+    if reply_to is not None:
+        lines.append(f"REPLY_TO_MESSAGE_ID: {reply_to}")
+
+    forwarded = message.get("forwarded_from")
+    if isinstance(forwarded, dict):
+        forward_bits = []
+        if forwarded.get("chat_title"):
+            forward_bits.append(str(forwarded["chat_title"]))
+        if forwarded.get("chat_username"):
+            forward_bits.append("@" + str(forwarded["chat_username"]))
+        if forwarded.get("channel_post") is not None:
+            forward_bits.append("post=" + str(forwarded["channel_post"]))
+        if forwarded.get("date_utc"):
+            forward_bits.append("date=" + str(forwarded["date_utc"]))
+        if forward_bits:
+            lines.append("FORWARD_CONTEXT: " + " | ".join(forward_bits))
+        if forwarded.get("telegram_url"):
+            lines.append("FORWARD_SOURCE_URL: " + str(forwarded["telegram_url"]))
+
+    media = message.get("media")
+    if isinstance(media, dict) and media.get("type"):
+        lines.append("MEDIA: " + str(media["type"]))
+    if text.startswith("[Медиа без подписи:"):
+        lines.append("MEDIA_ONLY: true")
+
+    external_urls = _ai_material_external_urls(message)
+    if external_urls:
+        lines.append("EXTERNAL_URLS:")
+        lines.extend("- " + url for url in external_urls)
+
+    if related_current_refs:
+        refs = []
+        for item in related_current_refs:
+            if isinstance(item, dict):
+                ref = item.get("message_ref") or item.get("message_key")
+            else:
+                ref = item
+            if ref:
+                refs.append(str(ref))
+        if refs:
+            lines.append("RELATED_CURRENT_REFS: " + ", ".join(refs))
+
+    lines.append("TEXT:")
+    lines.append(text or "[Нет текстового содержимого]")
+    return "\n".join(lines)
+
+
+def render_ai_friendly_markdown(payload):
+    """
+    Плоский, самодостаточный AI-facing экспорт без предварительной суммаризации.
+    Содержимое текущих сообщений не сокращается и не ранжируется.
+    """
+    meta = payload.get("meta") or {}
+    current_messages = [
+        *list(payload.get("news_messages") or []),
+        *list(payload.get("operational_messages") or []),
+    ]
+    current_messages.sort(
+        key=lambda item: (
+            item.get("date_local")
+            or item.get("date_utc")
+            or "",
+            item.get("channel_id") or 0,
+            item.get("message_id") or 0,
+        )
+    )
+
+    dates = [
+        item.get("date_local") or item.get("date_utc")
+        for item in current_messages
+        if item.get("date_local") or item.get("date_utc")
+    ]
+    interval = ""
+    if dates:
+        interval = f"{dates[0]} — {dates[-1]}"
+
+    lines = [
+        "# TelegramNewsAI — материал для ИИ",
+        "",
+        f"DIGEST_PROFILE: {meta.get('digest_profile_version') or DIGEST_PROFILE_VERSION}",
+        f"CURRENT_MESSAGES: {len(current_messages)}",
+    ]
+    if interval:
+        lines.append(f"LOCAL_INTERVAL: {interval}")
+
+    lines.extend([
+        "",
+        "## Задача",
+        "",
+        str(meta.get("recommended_digest_request") or DIGEST_REQUEST).strip(),
+        "",
+        "## Текущие сообщения",
+        "",
+        "Ниже все сообщения после принятой cleanup-дедупликации, в общей хронологии. "
+        "RELATED_HINT — только подсказка о возможном общем источнике, не готовая кластеризация событий.",
+        "",
+    ])
+
+    for message in current_messages:
+        lines.append(_ai_message_block(message))
+
+    continuity = payload.get("continuity_context") or {}
+    continuity_messages = continuity.get("messages") or []
+    if continuity_messages:
+        lines.extend([
+            "",
+            "## Предыстория вне выбранного периода",
+            "",
+            "Используй только для понимания развития текущих сюжетов; это не текущие новости.",
+            "",
+        ])
+        for item in continuity_messages:
+            if not isinstance(item, dict):
+                continue
+            context_message = item.get("context_message")
+            if isinstance(context_message, dict):
+                lines.append(
+                    _ai_message_block(
+                        context_message,
+                        label="CONTEXT",
+                        related_current_refs=item.get("related_current_message_refs"),
+                    )
+                )
+
+    changes = payload.get("changes_since_previous_digest") or {}
+    outside = changes.get("outside_period_changes") or []
+    if outside:
+        lines.extend([
+            "",
+            "## Содержательные изменения вне периода",
+            "",
+            "Это дополнительный контекст изменений, а не расширение временного окна основного дайджеста.",
+            "",
+        ])
+        for message in outside:
+            if isinstance(message, dict):
+                lines.append(_ai_message_block(message, label="OUTSIDE_CHANGE"))
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_ai_friendly_export(payload, destination=None):
+    destination = Path(destination or AI_LATEST_FILE)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.write_text(
+        render_ai_friendly_markdown(payload),
+        encoding="utf-8",
+    )
+    os.replace(temporary, destination)
+    return destination
 
 
 def _v4_build_changes_block(
@@ -6081,10 +6356,11 @@ def _v4_save_output(
                 "поля и обычное availability=available также не повторяются."
             ),
             "usage_hint": (
-                "Файл подготовлен для пользовательского анализа в выбранном "
-                "ИИ-ассистенте, например ChatGPT. Готовая редакционная инструкция "
-                "находится в recommended_digest_request. Программа не отправляет "
-                "файл во внешние сервисы автоматически."
+                "Это полный канонический машинный экспорт. Для внешнего ИИ рядом "
+                "создаётся более простой ДАЙДЖЕСТ_ДЛЯ_ИИ.md без предварительной "
+                "суммаризации и без потери текущих сообщений. Редакционная инструкция "
+                "также остаётся в recommended_digest_request. Программа не отправляет "
+                "файлы во внешние сервисы автоматически."
             ),
             "recommended_digest_request": (
                 DIGEST_REQUEST
@@ -6145,6 +6421,17 @@ def _v4_save_output(
         LATEST_FILE,
         archive_path,
     )
+
+    try:
+        write_ai_friendly_export(
+            payload,
+            AI_LATEST_FILE,
+        )
+    except Exception as e:
+        log_error(
+            "AI-friendly export failed (canonical JSON saved): "
+            + str(e)
+        )
 
     raw_path = None
 
@@ -7980,8 +8267,18 @@ async def _v4_main():
             f"{int(settings.get('log_retention_days', 14))} дней"
         )
 
+        if AI_LATEST_FILE.exists():
+            print(
+                "\nФАЙЛ ДЛЯ ИИ:"
+            )
+            print(AI_LATEST_FILE.name)
+            print(
+                "\nПуть:"
+            )
+            print(str(AI_LATEST_FILE))
+
         print(
-            "\nСТРУКТУРИРОВАННЫЙ JSON-ЭКСПОРТ:"
+            "\nПОЛНЫЙ ТЕХНИЧЕСКИЙ JSON:"
         )
         print(
             latest_path.name
@@ -8029,7 +8326,9 @@ async def _v4_main():
             True,
         ):
             open_and_select_file(
-                latest_path
+                AI_LATEST_FILE
+                if AI_LATEST_FILE.exists()
+                else latest_path
             )
 
         log_info(
