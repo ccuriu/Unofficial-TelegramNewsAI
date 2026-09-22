@@ -3510,7 +3510,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не нормализуй", rules)
         self.assertIn("не меняй query", rules)
         self.assertIn("не «исправляй» по памяти", rules)
-        self.assertIn("literal SOURCE_URL", rules)
+        self.assertIn("исходную literal URL", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
         self.assertNotIn("[Канал](url)", rules)
         self.assertNotIn("[Канал A](url)", rules)
