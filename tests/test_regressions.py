@@ -3536,7 +3536,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("«по данным источника»", rules)
         self.assertIn("«предположительно»", rules)
         self.assertIn(
-            "общая тема, страна, организация или война не означают одно событие",
+            "общая тема, страна или организация сами по себе не означают одно событие",
             rules,
         )
 
