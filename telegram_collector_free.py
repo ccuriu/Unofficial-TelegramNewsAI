@@ -46,7 +46,8 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.1"
+DIGEST_PROFILE_VERSION = "8.2"
+MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
 CRED_FILE = APP_DIR / "credentials.bin"
@@ -163,13 +164,10 @@ DEFAULT_SETTINGS = {
     "telethon_flood_sleep_threshold_seconds": 0,
     "stop_on_any_flood_wait": True,
 
-    # Умеренный последовательный профиль для обычного личного сценария.
-    # wait_time сглаживает серии GetHistoryRequest внутри больших историй;
-    # короткая межканальная пауза не превращает 30–50 каналов в долгий запуск.
+    # Умеренный последовательный профиль для поддерживаемого сценария
+    # максимум из 50 выбранных источников.
     "history_request_wait_seconds": 0.5,
     "inter_channel_delay_seconds": 0.25,
-    "bulk_channel_threshold": 100,
-    "bulk_inter_channel_delay_seconds": 0.5,
     "flood_wait_safety_seconds": 5,
 
     "open_output_folder": True,
@@ -231,8 +229,8 @@ def load_settings():
     result.update(data)
 
     # Однократно смягчаем только точный старый Testing-профиль 5.4.12.
-    # Если пользователь менял хотя бы один из этих параметров вручную,
-    # его настройки не трогаем.
+    # Параметры отдельного режима для 100+ каналов больше не используются:
+    # продуктовый максимум TelegramNewsAI — 50 выбранных источников.
     if (
         result.get("history_request_wait_seconds") == 1.0
         and result.get("inter_channel_delay_seconds") == 0.75
@@ -242,9 +240,9 @@ def load_settings():
         result.update({
             "history_request_wait_seconds": 0.5,
             "inter_channel_delay_seconds": 0.25,
-            "bulk_channel_threshold": 100,
-            "bulk_inter_channel_delay_seconds": 0.5,
         })
+    result.pop("bulk_channel_threshold", None)
+    result.pop("bulk_inter_channel_delay_seconds", None)
 
     # Эти ограничения не дают обычному поиску повторно сканировать Telegram
     # и загружать тяжёлую нейронную модель без явной необходимости.
@@ -272,20 +270,6 @@ def load_settings():
             min(
                 10.0,
                 float(result.get("inter_channel_delay_seconds", 0.25)),
-            ),
-        ),
-        "bulk_channel_threshold": max(
-            10,
-            min(
-                500,
-                int(result.get("bulk_channel_threshold", 100)),
-            ),
-        ),
-        "bulk_inter_channel_delay_seconds": max(
-            0.0,
-            min(
-                30.0,
-                float(result.get("bulk_inter_channel_delay_seconds", 0.5)),
             ),
         ),
         "flood_wait_safety_seconds": max(
@@ -376,7 +360,7 @@ def history_request_wait_seconds(settings):
 
 
 def inter_channel_delay_seconds(settings, channel_count):
-    """Пауза между каналами; для больших списков автоматически больше."""
+    """Пауза между каналами в поддерживаемом диапазоне до 50 источников."""
     source = settings or DEFAULT_SETTINGS
     try:
         normal = float(
@@ -388,31 +372,10 @@ def inter_channel_delay_seconds(settings, channel_count):
     except (TypeError, ValueError):
         normal = 0.25
 
-    try:
-        bulk = float(
-            source.get(
-                "bulk_inter_channel_delay_seconds",
-                0.5,
-            )
-        )
-    except (TypeError, ValueError):
-        bulk = 0.5
-
-    try:
-        threshold = int(
-            source.get(
-                "bulk_channel_threshold",
-                100,
-            )
-        )
-    except (TypeError, ValueError):
-        threshold = 100
-
-    normal = max(0.0, min(10.0, normal))
-    bulk = max(normal, min(30.0, bulk))
-    threshold = max(10, min(500, threshold))
-
-    return bulk if int(channel_count) > threshold else normal
+    # channel_count сохраняется в сигнатуре для совместимости и журналирования.
+    # Отдельного скрытого профиля для 100+ каналов больше нет.
+    _ = channel_count
+    return max(0.0, min(10.0, normal))
 
 
 def flood_wait_safety_seconds(settings):
@@ -783,6 +746,23 @@ def dedupe_channel_items(items):
     return result
 
 
+def channel_limit_message(count):
+    return (
+        f"TelegramNewsAI поддерживает максимум {MAX_SELECTED_CHANNELS} "
+        f"выбранных каналов/источников. Сейчас в списке: {int(count)}. "
+        "Удалите лишние каналы командой R или создайте список заново командой N."
+    )
+
+
+def print_channel_limit_error(items):
+    count = len(dedupe_channel_items(items))
+    if count <= MAX_SELECTED_CHANNELS:
+        return False
+    print("\n" + channel_limit_message(count))
+    print("Сетевой этап не запущен.")
+    return True
+
+
 def merge_resolved_channel(items, fresh_item):
     """Добавляет новый канал или освежает метаданные уже сохранённого."""
     channel_id = int(fresh_item["id"])
@@ -893,6 +873,15 @@ async def restore_saved_selection(client, subscribed_by_id):
 
 
 async def prompt_add_public_channels(client, items):
+    items = dedupe_channel_items(items)
+    if len(items) >= MAX_SELECTED_CHANNELS:
+        print(
+            "\nДостигнут продуктовый максимум: "
+            f"{MAX_SELECTED_CHANNELS} выбранных каналов/источников. "
+            "Сначала удалите лишний канал командой R."
+        )
+        return items
+
     print("\nМожно добавить публичные каналы БЕЗ подписки.")
     print("Поддерживаются:")
     print("  @example_channel")
@@ -939,6 +928,20 @@ async def prompt_add_public_channels(client, items):
 
         try:
             item = await resolve_public_channel(client, part)
+
+            already_selected = any(
+                int(existing["id"]) == int(item["id"])
+                for existing in items
+            )
+            if (
+                not already_selected
+                and len(items) >= MAX_SELECTED_CHANNELS
+            ):
+                print(
+                    f"  Не добавлен {part}: достигнут максимум "
+                    f"{MAX_SELECTED_CHANNELS} источников."
+                )
+                continue
 
             items, was_added, was_updated = merge_resolved_channel(
                 items,
@@ -1173,6 +1176,14 @@ async def select_from_subscriptions(client, subscribed):
             print("Введите выбор ещё раз или 0 для выхода.")
             continue
 
+        if len(selected_nums) > MAX_SELECTED_CHANNELS:
+            print(
+                f"Выбрано {len(selected_nums)} каналов, а TelegramNewsAI "
+                f"поддерживает максимум {MAX_SELECTED_CHANNELS}. "
+                "Уменьшите выбор."
+            )
+            continue
+
         items = [
             channel_item(
                 subscribed[i - 1].entity,
@@ -1191,6 +1202,22 @@ async def select_from_subscriptions(client, subscribed):
                     )
                 except Exception as e:
                     print(f"  Не добавлен {raw_value}: {e}")
+                    if public_index < len(public_values):
+                        await asyncio.sleep(0.5)
+                    continue
+
+                already_selected = any(
+                    int(existing["id"]) == int(item["id"])
+                    for existing in items
+                )
+                if (
+                    not already_selected
+                    and len(items) >= MAX_SELECTED_CHANNELS
+                ):
+                    print(
+                        f"  Не добавлен {raw_value}: достигнут максимум "
+                        f"{MAX_SELECTED_CHANNELS} источников."
+                    )
                     if public_index < len(public_values):
                         await asyncio.sleep(0.5)
                     continue
@@ -1305,6 +1332,8 @@ async def resolve_channels(
     # из штатного ежедневного пути и не меняет набор выбранных каналов.
     if skip_menu and not initial_action:
         saved = dedupe_channel_items(load_selection())
+        if saved and print_channel_limit_error(saved):
+            return []
         if saved:
             restored, cache_failed = (
                 await restore_saved_selection_from_session(
@@ -1334,6 +1363,14 @@ async def resolve_channels(
         client,
         subscribed_by_id,
     )
+
+    if (
+        skip_menu
+        and not initial_action
+        and restored
+        and print_channel_limit_error(restored)
+    ):
+        return []
 
     # Если сохранённого списка ещё нет, сначала создаём его.
     if not restored:
@@ -3625,9 +3662,14 @@ async def sync_all_channels(
     hours,
     settings,
 ):
+    total_channels = len(channels)
+    if total_channels > MAX_SELECTED_CHANNELS:
+        message = channel_limit_message(total_channels)
+        log_error("SYNC_BLOCKED | " + message)
+        raise ValueError(message)
+
     overall = init_sync_stats()
     started_at = time.monotonic()
-    total_channels = len(channels)
     channel_delay = inter_channel_delay_seconds(
         settings,
         total_channels,
@@ -5356,8 +5398,11 @@ EDITORIAL_PRINCIPLES = (
     "аналитику и не ранжируй событие без опоры на материал. Внешние источники используй точечно для первоисточника, документа, "
     "точной цифры или необходимого контекста. Служебные поля используй только для сопоставления; в готовом ответе технический "
     "процесс не показывай. Не обсуждай файл, JSON, локальную базу, синхронизацию, дедупликацию или алгоритм поиска. Пиши плотно и "
-    "профессионально; сохраняй имена, даты, числа и степень уверенности. Заголовки делай короткими и не сильнее подтверждённых "
-    "данных. Охвати все содержательно значимые сюжеты; второстепенное можно собрать компактно. "
+    "профессионально; сохраняй имена, даты, числа и степень уверенности. Итоговый ответ готовь на языке запроса пользователя; "
+    "если язык запроса не указан или неясен, пиши по-русски. Иноязычные публикации переводи по смыслу на язык итогового текста, "
+    "сохраняя имена, числа, цитируемые факты и ссылки на оригинальные публикации. Не разделяй источники по языку: русско-, "
+    "украино- и англоязычные сообщения объединяй в один сюжет, если они относятся к одному событию. Заголовки делай короткими "
+    "и не сильнее подтверждённых данных. Охвати все содержательно значимые сюжеты; второстепенное можно собрать компактно. "
 )
 
 
@@ -7379,7 +7424,10 @@ async def _v4_main():
                 return
 
             if mode in ("s", "search", "п", "поиск"):
-                channels = load_selection()
+                channels = dedupe_channel_items(load_selection())
+
+                if channels and print_channel_limit_error(channels):
+                    continue
 
                 if not channels:
                     print(
