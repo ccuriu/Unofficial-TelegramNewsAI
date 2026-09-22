@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.6"
+DIGEST_PROFILE_VERSION = "8.7"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -6077,6 +6077,284 @@ def _event_candidate_reply_counterparty_diverges(message, target_message):
     return left[0] == right[0] and left[1] != right[1]
 
 
+_EVENT_CANDIDATE_SOURCE_MARKERS = {
+    "media", "times", "reuters", "bloomberg", "politico",
+    "паблик", "издан", "агентств", "сми", "канал", "газет", "журнал",
+    "news", "post", "journal", "press",
+}
+_EVENT_CANDIDATE_ATTRIBUTION_TOKENS = {
+    "источник", "ссылк", "собеседник", "сообщает", "сообщил",
+    "сообщила", "сообщили", "пишет", "пишут", "передает", "передал",
+    "данным", "даними", "reports", "reported", "according",
+}
+
+
+def _event_candidate_source_label_tokens(fragment):
+    """Return continuity tokens only when a short fragment looks like a source name."""
+    fragment = str(fragment or "").strip()
+    if not fragment:
+        return set()
+
+    tokens = _continuity_message_tokens({"text": fragment})
+    if not tokens:
+        return set()
+
+    marker = any(
+        token in _EVENT_CANDIDATE_SOURCE_MARKERS
+        or any(
+            token.startswith(item) or item.startswith(token)
+            for item in _EVENT_CANDIDATE_SOURCE_MARKERS
+        )
+        for token in tokens
+    )
+    latin_words = re.findall(r"[A-Za-z][A-Za-z.'’-]*", fragment)
+    latin_title = bool(
+        latin_words
+        and len(latin_words) <= 4
+        and all(word[:1].isupper() or word.isupper() for word in latin_words)
+    )
+    return tokens if marker or latin_title else set()
+
+
+def _event_candidate_source_provenance_tokens(message):
+    """
+    Tokens that describe who reported the story rather than the story itself.
+
+    This is deliberately a veto-only lexical hint. It never changes document
+    frequency and never affects strong source relations.
+    """
+    text = str(message.get("text") or "")
+    first_paragraph = re.split(r"\n\s*\n", text, maxsplit=1)[0]
+    source_tokens = set()
+
+    prefix = re.match(
+        r"^\s*[^\w]*\s*(?P<label>[A-ZА-ЯЁІЇЄҐ][^:\n]{1,60}):\s+",
+        first_paragraph,
+        flags=re.UNICODE,
+    )
+    if prefix:
+        source_tokens.update(
+            _event_candidate_source_label_tokens(prefix.group("label"))
+        )
+
+    trailing = re.search(
+        r"\s+[—–-]\s+"
+        r"(?P<label>[A-ZА-ЯЁІЇЄҐ]"
+        r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9.'’& -]{1,78})\s*$",
+        first_paragraph,
+        flags=re.UNICODE,
+    )
+    if trailing:
+        source_tokens.update(
+            _event_candidate_source_label_tokens(trailing.group("label"))
+        )
+
+    cue_pattern = re.compile(
+        r"\b(?:пишет|пишут|сообщает|сообщают|сообщил|сообщила|сообщили|"
+        r"передает|передают|передал|передала|передали|"
+        r"according\s+to|reports?|reported)\b"
+        r"(?:\s+(?:о\s+том|об\s+этом))?"
+        r"(?:\s*[:,]?\s*)"
+        r"(?P<label>[^\n,.!?;—–]{1,70})",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    for match in cue_pattern.finditer(first_paragraph):
+        label = re.split(
+            r"\s+(?:со\s+ссыл\w*|із\s+посилан\w*|з\s+посилан\w*)",
+            match.group("label"),
+            maxsplit=1,
+            flags=re.IGNORECASE | re.UNICODE,
+        )[0]
+        source_tokens.update(_event_candidate_source_label_tokens(label))
+
+    backward_pattern = re.compile(
+        r"(?P<label>[A-ZА-ЯЁІЇЄҐ]"
+        r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9.'’& -]{1,60})\s+"
+        r"(?:\([^\n)]{1,20}\)\s*)?"
+        r"(?:со\s+ссыл\w*|із\s+посилан\w*|з\s+посилан\w*)",
+        flags=re.UNICODE,
+    )
+    for match in backward_pattern.finditer(first_paragraph):
+        words = match.group("label").strip().split()
+        source_tokens.update(
+            _event_candidate_source_label_tokens(" ".join(words[-4:]))
+        )
+
+    if not source_tokens:
+        return set()
+
+    result = set(source_tokens)
+    for token in _continuity_message_tokens(message):
+        if token in _EVENT_CANDIDATE_ATTRIBUTION_TOKENS:
+            result.add(token)
+    return result
+
+
+def _event_candidate_local_named_token(fragment):
+    fragment = str(fragment or "")
+    local = re.split(r"[:;.!?\n—–]", fragment)[-1]
+    return _event_candidate_named_token(local)
+
+
+def _event_candidate_meeting_counterpart_fragment(fragment):
+    return re.split(
+        r"[,;—–]|\s+(?:"
+        r"в|у|на|під|под|біля|около|at|in|on|during|after|before|where|who|which|"
+        r"заявил\w*|сообщил\w*|сообщает\w*|пишет\w*|передает\w*|"
+        r"будет|буде|will|ожида\w*|очіку\w*|возмож\w*|можлив\w*"
+        r")\b",
+        str(fragment or ""),
+        maxsplit=1,
+        flags=re.IGNORECASE | re.UNICODE,
+    )[0]
+
+
+def _event_candidate_confident_meeting_participants(message):
+    """
+    Extract a participant pair only from explicit, local meeting wording.
+
+    False negatives are preferable here: this helper is used only to veto a
+    pure lexical edge between two clearly different meetings.
+    """
+    text = unicodedata.normalize(
+        "NFKC",
+        str(message.get("text") or ""),
+    )[:360]
+    if not text:
+        return None
+
+    # "Встреча A с B" / "Зустріч A з B".
+    match = re.search(
+        r"\b(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\b\s+"
+        r"(?P<left>[^\n.!?]{1,100}?)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<right>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        left = _event_candidate_local_named_token(match.group("left"))
+        right = _event_candidate_named_token(
+            _event_candidate_meeting_counterpart_fragment(
+                match.group("right")
+            )
+        )
+        if left and right and left != right:
+            return (left, right)
+
+    # "Встреча A и B" / "Зустріч A та B".
+    match = re.search(
+        r"\b(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\b\s+"
+        r"(?P<left>[^\n.!?]{1,80}?)\s+"
+        r"(?:и|і|та|and|&)\s+(?P<right>[^\n.!?]{1,80})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        left = _event_candidate_local_named_token(match.group("left"))
+        right = _event_candidate_named_token(
+            _event_candidate_meeting_counterpart_fragment(
+                match.group("right")
+            )
+        )
+        if left and right and left != right:
+            return (left, right)
+
+    # Confident verb forms only; do not let the noun "встреча" match here.
+    match = re.search(
+        r"(?P<left>.{0,100}?)\b(?:"
+        r"встрет(?:ился|илась|ились|ится|ятся)"
+        r"|встреча(?:ется|ются)"
+        r"|зустр(?:івся|ілася|ілися|інеться|інуться|ічається|ічаються)"
+        r"|met|meets?|will\s+meet"
+        r")\b\s+(?:с|со|з|зі|із|with\s+)?"
+        r"(?P<right>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        left = _event_candidate_local_named_token(match.group("left"))
+        right = _event_candidate_named_token(
+            _event_candidate_meeting_counterpart_fragment(
+                match.group("right")
+            )
+        )
+        if left and right and left != right:
+            return (left, right)
+
+    # "A провёл/провів/проведёт встречу с B".
+    match = re.search(
+        r"(?P<left>.{0,100}?)\b"
+        r"(?:провед\w*|провел\w*|провёл\w*|провів\w*)\s+"
+        r"(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<right>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        left = _event_candidate_local_named_token(match.group("left"))
+        right = _event_candidate_named_token(
+            _event_candidate_meeting_counterpart_fragment(
+                match.group("right")
+            )
+        )
+        if left and right and left != right:
+            return (left, right)
+
+    # "A и B проведут встречу / will meet".
+    match = re.search(
+        r"(?P<subjects>[^\n.!?]{1,140}?)\s+\b(?:"
+        r"провед\w*\s+(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)"
+        r"|(?:will\s+)?meet|hold\w*\s+(?:a\s+)?meeting)\b",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        parts = re.split(
+            r"\s+(?:и|і|та|and|&)\s+",
+            match.group("subjects"),
+            flags=re.IGNORECASE | re.UNICODE,
+        )
+        if len(parts) >= 2:
+            left = _event_candidate_local_named_token(parts[-2])
+            right = _event_candidate_local_named_token(parts[-1])
+            if left and right and left != right:
+                return (left, right)
+
+    return None
+
+
+def _event_candidate_participant_equivalent(left, right):
+    if left == right:
+        return True
+    shorter, longer = sorted((left, right), key=len)
+    return (
+        len(shorter) >= 5
+        and len(longer) - len(shorter) <= 3
+        and longer.startswith(shorter)
+    )
+
+
+def _event_candidate_meeting_pairs_equivalent(left, right):
+    return (
+        _event_candidate_participant_equivalent(left[0], right[0])
+        and _event_candidate_participant_equivalent(left[1], right[1])
+    ) or (
+        _event_candidate_participant_equivalent(left[0], right[1])
+        and _event_candidate_participant_equivalent(left[1], right[0])
+    )
+
+
+def _event_candidate_lexical_meeting_participants_diverge(
+    message,
+    target_message,
+):
+    left = _event_candidate_confident_meeting_participants(message)
+    right = _event_candidate_confident_meeting_participants(target_message)
+    if not left or not right:
+        return False
+    return not _event_candidate_meeting_pairs_equivalent(left, right)
+
+
 def build_event_candidates(current_messages):
     """
     Deterministic CURRENT -> CURRENT coverage layer for the AI-facing export.
@@ -6275,6 +6553,12 @@ def build_event_candidates(current_messages):
     def lexical_score(left_key, right_key):
         left = by_key[left_key]
         right = by_key[right_key]
+        if _event_candidate_lexical_meeting_participants_diverge(
+            left,
+            right,
+        ):
+            return None
+
         left_tokens = {
             token
             for token in tokens_by_key.get(left_key, set())
@@ -6330,6 +6614,8 @@ def build_event_candidates(current_messages):
             anchors_by_key.get(left_key, set())
             & anchors_by_key.get(right_key, set())
         )
+        left_provenance_tokens = _event_candidate_source_provenance_tokens(left)
+        right_provenance_tokens = _event_candidate_source_provenance_tokens(right)
         has_event_anchor = any(
             anchor_pair_document_frequency.get(pair, 0)
             <= anchor_pair_limit
@@ -6338,6 +6624,10 @@ def build_event_candidates(current_messages):
                 token_document_frequency.get(pair[1], document_count),
             )
             <= anchor_token_limit
+            and not (
+                set(pair).issubset(left_provenance_tokens)
+                and set(pair).issubset(right_provenance_tokens)
+            )
             for pair in shared_anchor_pairs
         )
         if not has_event_anchor:
