@@ -3564,7 +3564,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.5")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.6")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -3670,6 +3670,157 @@ class OfflineRegressionTests(unittest.TestCase):
             "same_specific_external_source",
             layer["candidates"][0]["relation_reasons"],
         )
+
+    def test_event_candidate_reply_different_counterparty_stays_separate(self):
+        scheduled = self._candidate_message(
+            1,
+            1,
+            10,
+            "Президент Арлен встретится с Бореком завтра.",
+        )
+        held_with_other = self._candidate_message(
+            1,
+            2,
+            20,
+            "Президент Арлен встретился с Корвином сегодня.",
+            reply_to_message_id=1,
+        )
+
+        layer = collector.build_event_candidates(
+            [scheduled, held_with_other]
+        )
+
+        self.assertEqual(len(layer["candidates"]), 2)
+        self.assertEqual(layer["coverage"]["input_current_messages"], 2)
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+        assigned = {
+            ref["message_key"]
+            for candidate in layer["candidates"]
+            for ref in candidate["member_refs"]
+        }
+        self.assertEqual(assigned, {"1:1", "1:2"})
+
+    def test_event_candidate_reply_same_counterparty_remains_strong(self):
+        scheduled = self._candidate_message(
+            1,
+            1,
+            10,
+            "Президент Арлен встретится с Бореком завтра.",
+        )
+        held_update = self._candidate_message(
+            1,
+            2,
+            20,
+            "Президент Арлен встретился с Бореком и обсудил торговлю.",
+            reply_to_message_id=1,
+        )
+
+        layer = collector.build_event_candidates([scheduled, held_update])
+
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(
+            layer["candidates"][0]["relation"],
+            "strong_source",
+        )
+        self.assertIn(
+            "reply_to_current_message",
+            layer["candidates"][0]["relation_reasons"],
+        )
+
+    def test_event_candidate_ordinary_reply_remains_strong(self):
+        notice = self._candidate_message(
+            1,
+            1,
+            10,
+            "Порт закрыт из-за шторма.",
+        )
+        update = self._candidate_message(
+            1,
+            2,
+            20,
+            "Уточнение: движение судов возобновится вечером.",
+            reply_to_message_id=1,
+        )
+
+        layer = collector.build_event_candidates([notice, update])
+
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertIn(
+            "reply_to_current_message",
+            layer["candidates"][0]["relation_reasons"],
+        )
+
+    def test_event_candidate_counterparty_veto_does_not_weaken_other_strong_relations(self):
+        left_text = "Президент Арлен встретится с Бореком завтра."
+        right_text = "Президент Арлен встретился с Корвином сегодня."
+        article = "https://example.com/news/material-counterparty"
+
+        cases = [
+            (
+                "forward",
+                self._candidate_message(
+                    1,
+                    1,
+                    10,
+                    left_text,
+                    origin_key="telegram_forward:777:42",
+                ),
+                self._candidate_message(
+                    2,
+                    2,
+                    20,
+                    right_text,
+                    origin_key="telegram_forward:777:42",
+                ),
+                "telegram_forward_origin",
+            ),
+            (
+                "external_source",
+                self._candidate_message(
+                    1,
+                    3,
+                    10,
+                    left_text,
+                    canonical_urls=[article],
+                ),
+                self._candidate_message(
+                    2,
+                    4,
+                    20,
+                    right_text,
+                    canonical_urls=[article],
+                ),
+                "same_specific_external_source",
+            ),
+            (
+                "related_group",
+                self._candidate_message(
+                    1,
+                    5,
+                    10,
+                    left_text,
+                    related_group_id="related_test",
+                ),
+                self._candidate_message(
+                    2,
+                    6,
+                    20,
+                    right_text,
+                    related_group_id="related_test",
+                ),
+                "related_message_group",
+            ),
+        ]
+
+        for label, first, second, reason in cases:
+            with self.subTest(label=label):
+                layer = collector.build_event_candidates([first, second])
+                self.assertEqual(len(layer["candidates"]), 1)
+                self.assertIn(
+                    reason,
+                    layer["candidates"][0]["relation_reasons"],
+                )
 
     def test_event_candidate_near_duplicates_keep_one_full_evidence_and_supporting_ref(self):
         older = self._candidate_message(
@@ -3891,7 +4042,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.5", rendered)
+        self.assertIn("DIGEST_PROFILE: 8.6", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
