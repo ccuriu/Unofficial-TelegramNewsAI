@@ -6344,17 +6344,6 @@ def _event_candidate_meeting_pairs_equivalent(left, right):
     )
 
 
-def _event_candidate_lexical_meeting_participants_diverge(
-    message,
-    target_message,
-):
-    left = _event_candidate_confident_meeting_participants(message)
-    right = _event_candidate_confident_meeting_participants(target_message)
-    if not left or not right:
-        return False
-    return not _event_candidate_meeting_pairs_equivalent(left, right)
-
-
 def build_event_candidates(current_messages):
     """
     Deterministic CURRENT -> CURRENT coverage layer for the AI-facing export.
@@ -6534,6 +6523,8 @@ def build_event_candidates(current_messages):
 
     tokens_by_key = {}
     anchors_by_key = {}
+    meeting_participants_by_key = {}
+    source_provenance_tokens_by_key = {}
     token_document_frequency = Counter()
     anchor_pair_document_frequency = Counter()
     for key, message in by_key.items():
@@ -6541,6 +6532,12 @@ def build_event_candidates(current_messages):
         anchors = _continuity_event_anchor_pairs(message)
         tokens_by_key[key] = tokens
         anchors_by_key[key] = anchors
+        meeting_participants_by_key[key] = (
+            _event_candidate_confident_meeting_participants(message)
+        )
+        source_provenance_tokens_by_key[key] = (
+            _event_candidate_source_provenance_tokens(message)
+        )
         token_document_frequency.update(tokens)
         anchor_pair_document_frequency.update(anchors)
 
@@ -6553,9 +6550,15 @@ def build_event_candidates(current_messages):
     def lexical_score(left_key, right_key):
         left = by_key[left_key]
         right = by_key[right_key]
-        if _event_candidate_lexical_meeting_participants_diverge(
-            left,
-            right,
+        left_meeting = meeting_participants_by_key.get(left_key)
+        right_meeting = meeting_participants_by_key.get(right_key)
+        if (
+            left_meeting
+            and right_meeting
+            and not _event_candidate_meeting_pairs_equivalent(
+                left_meeting,
+                right_meeting,
+            )
         ):
             return None
 
@@ -6614,8 +6617,14 @@ def build_event_candidates(current_messages):
             anchors_by_key.get(left_key, set())
             & anchors_by_key.get(right_key, set())
         )
-        left_provenance_tokens = _event_candidate_source_provenance_tokens(left)
-        right_provenance_tokens = _event_candidate_source_provenance_tokens(right)
+        left_provenance_tokens = source_provenance_tokens_by_key.get(
+            left_key,
+            set(),
+        )
+        right_provenance_tokens = source_provenance_tokens_by_key.get(
+            right_key,
+            set(),
+        )
         has_event_anchor = any(
             anchor_pair_document_frequency.get(pair, 0)
             <= anchor_pair_limit
