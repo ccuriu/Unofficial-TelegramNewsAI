@@ -6152,7 +6152,7 @@ def _event_candidate_reply_counterparty_diverges(message, target_message):
 
 def _event_candidate_lexical_actor_token(fragment):
     fragment = re.split(
-        r"[:;]\\s*",
+        r"[:;]\s*",
         str(fragment or ""),
     )[-1]
     return _event_candidate_named_token(fragment)
@@ -6160,8 +6160,8 @@ def _event_candidate_lexical_actor_token(fragment):
 
 def _event_candidate_lexical_counterpart_token(fragment):
     fragment = re.split(
-        r"[,;:]|\\s+(?:в|у|на|під|под|біля|около|at|in|on|during|"
-        r"after|before|where|who|which)\\s+",
+        r"[,;:]|\s+(?:в|у|на|під|под|біля|около|at|in|on|during|"
+        r"after|before|where|who|which)\s+",
         str(fragment or ""),
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -6187,9 +6187,9 @@ def _event_candidate_lexical_meeting_pair(message):
     # RU/UA explicit verb: "A встретился / зустрівся з B".
     # Ukrainian noun "зустрічі" is deliberately excluded here.
     match = re.search(
-        r"(?P<before>.{0,100}?)\\b(?:встрет\\w*|"
-        r"зустр(?:ів|іла|іли|ін|іча)\\w*)\\b\\s+"
-        r"(?:с|со|з|зі|із)\\s+(?P<after>[^\\n.!?]{1,100})",
+        r"(?P<before>.{0,100}?)\b(?:встрет\w*|"
+        r"зустр(?:ів|іла|іли|ін|іча)\w*)\b\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
@@ -6205,8 +6205,8 @@ def _event_candidate_lexical_meeting_pair(message):
 
     # EN: "A will meet/met/meets [with] B".
     match = re.search(
-        r"(?P<before>.{0,100}?)\\b(?:will\\s+meet|met|meets?)\\b\\s+"
-        r"(?:with\\s+)?(?P<after>[^\\n.!?]{1,100})",
+        r"(?P<before>.{0,100}?)\b(?:will\s+meet|met|meets?)\b\s+"
+        r"(?:with\s+)?(?P<after>[^\n.!?]{1,100})",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
@@ -6222,20 +6222,20 @@ def _event_candidate_lexical_meeting_pair(message):
 
     # Joint subject: "A и/та/and B проведут встречу / will meet".
     match = re.search(
-        r"(?P<subjects>[^\\n.!?]{1,140}?)\\s+\\b(?:"
-        r"провед\\w*\\s+(?:встреч\\w*|зустріч\\w*|"
-        r"переговор\\w*|перемов\\w*)"
-        r"|(?:will\\s+)?meet|hold\\w*\\s+(?:a\\s+)?meeting)\\b",
+        r"(?P<subjects>[^\n.!?]{1,140}?)\s+\b(?:"
+        r"провед\w*\s+(?:встреч\w*|зустріч\w*|"
+        r"переговор\w*|перемов\w*)"
+        r"|(?:will\s+)?meet|hold\w*\s+(?:a\s+)?meeting)\b",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
     if match:
         subjects = re.split(
-            r"[:;]\\s*",
+            r"[:;]\s*",
             match.group("subjects"),
         )[-1]
         parts = re.split(
-            r"\\s+(?:и|та|and|&)\\s+",
+            r"\s+(?:и|та|and|&)\s+",
             subjects,
             flags=re.IGNORECASE,
         )
@@ -6247,9 +6247,9 @@ def _event_candidate_lexical_meeting_pair(message):
 
     # RU/UA: "A проведёт встречу/переговоры с B".
     match = re.search(
-        r"(?P<before>.{0,100}?)\\bпровед\\w*\\s+"
-        r"(?:встреч\\w*|зустріч\\w*|переговор\\w*|перемов\\w*)\\s+"
-        r"(?:с|со|з|зі|із)\\s+(?P<after>[^\\n.!?]{1,100})",
+        r"(?P<before>.{0,100}?)\bпровед\w*\s+"
+        r"(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
@@ -6267,16 +6267,16 @@ def _event_candidate_lexical_meeting_pair(message):
     # Reject an immediate preposition after the noun; otherwise a phrase like
     # "із зустрічі з делегацією" can scan ahead and invent an actor.
     match = re.search(
-        r"\\b(?:встреч(?:а|и|у|ей)|зустріч(?:і|у)?)\\s+"
-        r"(?P<actor>(?!(?:с|со|з|зі|із)\\b)[^\\n.!?]{1,80}?)\\s+"
-        r"(?:с|со|з|зі|із)\\s+(?P<after>[^\\n.!?]{1,100})",
+        r"\b(?:встреч(?:а|и|у|ей)|зустріч(?:і|у)?)\s+"
+        r"(?P<actor>(?!(?:с|со|з|зі|із)\b)[^\n.!?]{1,80}?)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
     if match:
         actor_fragment = match.group("actor")
         actor_words = re.findall(
-            r"[^\\W_]+(?:['’-][^\\W_]+)*",
+            r"[^\W_]+(?:['’-][^\W_]+)*",
             actor_fragment,
             flags=re.UNICODE,
         )
@@ -6290,20 +6290,20 @@ def _event_candidate_lexical_meeting_pair(message):
 
     # Noun-led scheduled/status form: "Зустріч A і B буде ...".
     match = re.search(
-        r"\\b(?:встреч(?:а|и|у)|зустріч(?:і|у)?)\\s+"
-        r"(?P<subjects>[^\\n.!?]{1,120}?)\\s+"
-        r"\\b(?:буд\\w*|відбуд\\w*|состо\\w*|заплан\\w*|"
-        r"ожида\\w*|очіку\\w*|возмож\\w*|можлив\\w*)\\b",
+        r"\b(?:встреч(?:а|и|у)|зустріч(?:і|у)?)\s+"
+        r"(?P<subjects>[^\n.!?]{1,120}?)\s+"
+        r"\b(?:буд\w*|відбуд\w*|состо\w*|заплан\w*|"
+        r"ожида\w*|очіку\w*|возмож\w*|можлив\w*)\b",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
     if match:
         subjects = re.split(
-            r"[:;]\\s*",
+            r"[:;]\s*",
             match.group("subjects"),
         )[-1]
         parts = re.split(
-            r"\\s+(?:и|та|and|&)\\s+",
+            r"\s+(?:и|та|and|&)\s+",
             subjects,
             flags=re.IGNORECASE,
         )
