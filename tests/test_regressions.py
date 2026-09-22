@@ -3528,7 +3528,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn(
-            "реальные испытания Telegram API продолжаются параллельно",
+            "сетевой профиль ещё проверяется в реальной работе",
             readme,
         )
         self.assertIn(
