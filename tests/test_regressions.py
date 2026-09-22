@@ -3933,6 +3933,37 @@ class OfflineRegressionTests(unittest.TestCase):
             layer["candidates"][0]["relation_reasons"],
         )
 
+    def test_event_candidate_lexical_same_meeting_pair_inflected_forms_stays_joined(self):
+        later = self._candidate_message(
+            1,
+            1,
+            20,
+            (
+                "Встреча Трампа с Зеленским на полях Генеральной Ассамблеи "
+                "ООН подтверждена. Переговоры ожидаются завтра."
+            ),
+        )
+        earlier = self._candidate_message(
+            1,
+            2,
+            10,
+            (
+                "Зеленский проведёт встречу с Трампом на полях Генеральной "
+                "Ассамблеи ООН. Переговоры ожидаются завтра."
+            ),
+        )
+
+        layer = collector.build_event_candidates([later, earlier])
+
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(
+            {
+                ref["message_key"]
+                for ref in layer["candidates"][0]["member_refs"]
+            },
+            {"1:1", "1:2"},
+        )
+
     def test_event_candidate_multiword_publisher_attribution_is_not_event_anchor(self):
         appointment = self._candidate_message(
             1,
