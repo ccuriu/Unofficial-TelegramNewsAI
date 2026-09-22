@@ -11,6 +11,8 @@
 - [x] Продуктовый максимум первого Stable установлен в **50 выбранных каналов/источников**.
 - [x] Код не содержит отдельного эксплуатационного режима для 60/75/100+ каналов и блокирует сетевой этап при списке больше 50.
 - [x] README и план испытаний ясно отличают «поддерживается/тестируется максимум 50» от несуществующей гарантии Telegram API.
+- [x] Штатный inter-channel default увеличен до 1,0 с без anti-detection jitter.
+- [x] Обычный sync пишет локальный `API_SAFETY_SUMMARY`; логические history-итераторы не выдаются за точное число MTProto requests.
 - [ ] На реальной рабочей установке сформирован список из 50 реально нужных источников.
 - [ ] Выполнены минимум 3 штатных 24-часовых прогона на полном списке из 50 без FloodWait, PEER_FLOOD, защитной остановки, повторной авторизации или изменения состояния аккаунта.
 - [ ] После реальных прогонов зафиксирована финальная приёмка сетевого режима 50.
@@ -52,18 +54,22 @@
 - [x] Release ZIP называется `Unofficial-TelegramNewsAI-...`.
 - [ ] Если репозиторий решено открыть публично, финально проверены README, скриншоты, Releases и описание репозитория на отсутствие впечатления официального продукта Telegram.
 
-### Sponsored Messages
+### Public distribution / Terms / Sponsored Messages
 
-- [x] Для текущей пакетной архитектуры collector/search/export вопрос Sponsored Messages исследован и закрыт.
-- [x] Программа не предоставляет штатный интерфейс чтения Telegram-ленты и не запрашивает отдельный поток Sponsored Messages.
-- [x] Повторная проверка нужна только при существенном изменении продукта в сторону встроенного просмотра Telegram-контента.
+- [x] Для **локального личного Stable** вопрос Sponsored Messages не считается автоматическим блокером технической приёмки.
+- [x] Зафиксировано, что программа не предоставляет штатный интерфейс чтения Telegram-ленты и не запрашивает отдельный поток Sponsored Messages.
+- [ ] **До публичного распространения** отдельно закрыта применимость Telegram API Terms 1.5 к текущей архитектуре.
+- [ ] **До публичного распространения** отдельно закрыта применимость Content Licensing / AI Scraping Terms к collector → local archive → JSON → user-selected AI workflow.
+- [ ] **До публичного распространения** отдельно закрыта применимость требования official Sponsored Messages к текущей пакетной архитектуре.
+- [x] Никакого категорического вывода «точно нарушает» / «точно соответствует» без отдельного анализа не зафиксировано.
 
 ## 6. Release / CI
 
 - [x] Offline regression suite, Python compile/import, PowerShell syntax и launcher self-test входят в CI.
 - [x] Release ZIP проверяется против whitelist `release_manifest.json` и не включает пользовательские session/credentials/db/settings/logs/дайджесты.
 - [x] Clean install и in-place update уже покрыты реальной Windows CI-проверкой с сохранением пользовательского состояния.
-- [x] Актуальный кандидат после введения лимита 50 прошёл полный CI: 154 offline regression tests, сборку release-кандидата, clean install и in-place update.
+- [x] Базовый кандидат до MTProto-hardening прошёл полный CI: 154 offline regression tests, сборку release-кандидата, clean install и in-place update.
+- [ ] MTProto-hardening кандидат проходит обновлённый полный CI после добавления regression tests.
 - [ ] На рабочем компьютере после обновления выполнен smoke-цикл `запуск → 24-часовой дайджест → тематический поиск`.
 - [ ] Финальный ZIP и SHA-256 подготовлены.
 - [ ] Версия помечена Stable только после реальных прогонов на 50 и финальной приёмки.
@@ -74,5 +80,11 @@
 - https://core.telegram.org/api/terms
 - https://telegram.org/tos/content-licensing
 - https://core.telegram.org/api/errors
+- https://core.telegram.org/api/errors.json
+- https://core.telegram.org/api/auth
+- https://core.telegram.org/method/messages.getHistory
+- https://core.telegram.org/constructor/message
 - https://core.telegram.org/api/sponsored-messages
-- https://docs.telethon.dev/
+- https://docs.telethon.dev/en/stable/modules/client.html
+- https://docs.telethon.dev/en/stable/concepts/entities.html
+- https://docs.telethon.dev/en/stable/modules/sessions.html
