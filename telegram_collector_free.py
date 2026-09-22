@@ -245,7 +245,7 @@ def load_settings():
         and data.get("max_flood_wait_seconds") == 0
         and data.get("stop_on_any_flood_wait") is True
         and data.get("refresh_recent_messages") == 50
-        and float(data.get("refresh_recent_hours", 2)) == 2.0
+        and data.get("refresh_recent_hours") in (2, 2.0)
     )
     if legacy_bulk_profile:
         result.update({
