@@ -3564,7 +3564,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.6")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.7")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -3877,6 +3877,141 @@ class OfflineRegressionTests(unittest.TestCase):
             "lexical_candidate",
         )
 
+    def test_event_candidate_lexical_divergent_explicit_meeting_pairs_stay_separate(self):
+        possible = self._candidate_message(
+            1,
+            1,
+            20,
+            (
+                "Встреча Трампа с президентом Ирана Пезешкианом в рамках "
+                "Генассамблеи ООН возможна, но пока не запланирована, заявил "
+                "госсекретарь США Марко Рубио."
+            ),
+        )
+        expected = self._candidate_message(
+            1,
+            2,
+            10,
+            (
+                "Встреча Сергея Лаврова с госсекретарём США Марко Рубио "
+                "ожидается 23 сентября в Нью-Йорке."
+            ),
+        )
+
+        layer = collector.build_event_candidates([possible, expected])
+
+        self.assertEqual(len(layer["candidates"]), 2)
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+
+    def test_event_candidate_lexical_same_explicit_meeting_pair_stays_joined(self):
+        later = self._candidate_message(
+            1,
+            1,
+            20,
+            "Зустріч Зеленського і Трампа буде сьогодні о 20:15 за Києвом.",
+        )
+        earlier = self._candidate_message(
+            1,
+            2,
+            10,
+            "Завтра ввечері Зеленський та Трамп проведуть зустріч.",
+        )
+
+        layer = collector.build_event_candidates([later, earlier])
+
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(
+            {
+                ref["message_key"]
+                for ref in layer["candidates"][0]["member_refs"]
+            },
+            {"1:1", "1:2"},
+        )
+        self.assertIn(
+            "lexical_anchor_gate",
+            layer["candidates"][0]["relation_reasons"],
+        )
+
+    def test_event_candidate_multiword_publisher_attribution_is_not_event_anchor(self):
+        appointment = self._candidate_message(
+            1,
+            1,
+            20,
+            (
+                "Президент АФК «Система» Тагир Ситдеков покидает свой пост. "
+                "Его заменит сын основателя холдинга Владимира Евтушенкова "
+                "Феликс. Об этом сообщили два источника РБК, а также Frank "
+                "Media (FM) со ссылкой на два источника, близких к компании."
+            ),
+        )
+        committee = self._candidate_message(
+            1,
+            2,
+            10,
+            (
+                "Комитет Госдумы по финансовому рынку может перейти к другой "
+                "фракции, сообщает Frank Media со ссылкой на несколько "
+                "источников в финансовой сфере."
+            ),
+        )
+
+        layer = collector.build_event_candidates([appointment, committee])
+
+        self.assertEqual(len(layer["candidates"]), 2)
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+
+    def test_event_candidate_publisher_anchor_does_not_pull_unrelated_ft_story(self):
+        budget_long = self._candidate_message(
+            1,
+            1,
+            30,
+            (
+                "Политический провал Мерца поставил под угрозу бюджет ЕС "
+                "на €2 трлн — Financial Times. Канцлер Германии ослаблен, "
+                "и договориться лидерам ЕС о бюджете стало значительно сложнее."
+            ),
+        )
+        budget_short = self._candidate_message(
+            2,
+            2,
+            20,
+            (
+                "Переговоры по бюджету ЕС оказались под угрозой из-за провала "
+                "партии Мерца на выборах, пишет FT. У канцлера Германии "
+                "большие проблемы, что влияет на договорённости лидеров ЕС."
+            ),
+        )
+        diesel = self._candidate_message(
+            2,
+            3,
+            10,
+            (
+                "США не рассматривают возможность ограничения экспорта "
+                "дизельного топлива, несмотря на значительный рост его "
+                "стоимости. Об этом пишет Financial Times со ссылкой на "
+                "представителя Белого дома."
+            ),
+        )
+
+        layer = collector.build_event_candidates(
+            [budget_long, budget_short, diesel]
+        )
+
+        membership = [
+            {
+                ref["message_key"]
+                for ref in candidate["member_refs"]
+            }
+            for candidate in layer["candidates"]
+        ]
+        self.assertEqual(len(membership), 2)
+        self.assertIn({"1:1", "2:2"}, membership)
+        self.assertIn({"2:3"}, membership)
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+
     def test_event_candidate_broad_common_topic_does_not_merge(self):
         messages = [
             self._candidate_message(
@@ -4042,7 +4177,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.6", rendered)
+        self.assertIn("DIGEST_PROFILE: 8.7", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
