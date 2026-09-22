@@ -60,7 +60,7 @@ The pre-Stable hardening intentionally does **not** replace the existing increme
 1. get messages newer than the locally stored cursor;
 2. where useful, refresh a bounded recent window for edits and mutable metrics.
 
-The hardening removes a redundant refresh on first sync and skips the refresh when there was no already-known message inside the configured refresh window. When a recent known message exists, the separate refresh remains because preserving edit/metrics detection and simple cursor semantics is more important than saving one logical iterator.
+The hardening keeps the separate refresh on first sync, because edits or mutable metrics may change during a longer initial backfill. On later incremental syncs, the refresh is skipped only when there was no already-known message inside the configured refresh window. When a recent known message exists, the separate refresh remains because preserving edit/metrics detection and simple cursor semantics is more important than saving one logical iterator.
 
 `history_request_wait_seconds = 0.5` remains unchanged. It controls pacing inside history iteration; it is not assumed to be a delay before every first request to a channel.
 
