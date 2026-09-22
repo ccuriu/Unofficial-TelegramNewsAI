@@ -4893,28 +4893,28 @@ def _continuity_attribution_anchor_tokens(message):
     this helper is used only by the pure lexical event-anchor gate.
     """
     text = re.sub(
-        r"https?://\\S+",
+        r"https?://\S+",
         " ",
         str(message.get("text") or ""),
         flags=re.IGNORECASE,
     )
     first_paragraph = re.split(
-        r"\\n\\s*\\n",
+        r"\n\s*\n",
         text,
         maxsplit=1,
     )[0]
 
     result = set()
     for match in re.finditer(
-        r"\\b(?:сообща\\w*|пиш\\w*|переда\\w*)\\s+"
-        r"(?P<source>[^\\n,.;:()]{1,80}?)\\s+"
-        r"(?:со|с|з)\\s+ссылк\\w*",
+        r"\b(?:сообща\w*|пиш\w*|переда\w*)\s+"
+        r"(?P<source>[^\n,.;:()]{1,80}?)\s+"
+        r"(?:со|с|з)\s+ссылк\w*",
         first_paragraph,
         flags=re.IGNORECASE | re.UNICODE,
     ):
         source_tokens = []
         for token in re.findall(
-            r"[^\\W_]+(?:['’-][^\\W_]+)*",
+            r"[^\W_]+(?:['’-][^\W_]+)*",
             unicodedata.normalize(
                 "NFKC",
                 match.group("source"),
@@ -4937,7 +4937,7 @@ def _continuity_attribution_anchor_tokens(message):
             continue
 
         for token in re.findall(
-            r"[^\\W_]+(?:['’-][^\\W_]+)*",
+            r"[^\W_]+(?:['’-][^\W_]+)*",
             unicodedata.normalize(
                 "NFKC",
                 match.group(0),
@@ -6170,16 +6170,16 @@ def _event_candidate_lexical_meeting_pair(message):
         return None
 
     match = re.search(
-        r"\\b(?:встреч\\w*|зустріч\\w*|переговор\\w*|перемов\\w*)\\s+"
-        r"(?P<actor>[^\\n.!?]{1,90}?)\\s+"
-        r"(?:с|со|з|зі|із)\\s+(?P<after>[^\\n.!?]{1,100})",
+        r"\b(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\s+"
+        r"(?P<actor>[^\n.!?]{1,90}?)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
     if match:
         actor = _event_candidate_named_token(match.group("actor"))
         counterpart_fragment = re.split(
-            r"\\s+(?:в|у|на|під|под|біля|около|at|in|on|during)\\s+",
+            r"\s+(?:в|у|на|під|под|біля|около|at|in|on|during)\s+",
             match.group("after"),
             maxsplit=1,
             flags=re.IGNORECASE,
@@ -6189,16 +6189,16 @@ def _event_candidate_lexical_meeting_pair(message):
             return tuple(sorted((actor, counterpart)))
 
     match = re.search(
-        r"\\b(?:встреч\\w*|зустріч\\w*)\\s+"
-        r"(?P<subjects>[^\\n.!?]{1,140}?)\\s+"
-        r"\\b(?:буд\\w*|відбуд\\w*|состо\\w*|заплан\\w*|"
-        r"ожида\\w*|очіку\\w*|возмож\\w*|можлив\\w*)\\b",
+        r"\b(?:встреч\w*|зустріч\w*)\s+"
+        r"(?P<subjects>[^\n.!?]{1,140}?)\s+"
+        r"\b(?:буд\w*|відбуд\w*|состо\w*|заплан\w*|"
+        r"ожида\w*|очіку\w*|возмож\w*|можлив\w*)\b",
         text,
         flags=re.IGNORECASE | re.UNICODE,
     )
     if match:
         parts = re.split(
-            r"\\s+(?:и|та|and|&)\\s+",
+            r"\s+(?:и|та|and|&)\s+",
             match.group("subjects"),
             flags=re.IGNORECASE,
         )
