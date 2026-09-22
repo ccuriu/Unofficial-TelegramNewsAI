@@ -3347,8 +3347,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("Google или redirect-ссылкой", request)
         self.assertIn("не «исправляй» по памяти", request)
         self.assertIn("исходную literal URL", request)
-        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", request)
-        self.assertIn("2–3 ключевые ссылки", request)
+        self.assertIn("Каждый самостоятельный фактический сюжет завершай строкой источника", request)
+        self.assertIn("для составного — 2–3 ключевых", request)
 
     def test_user_instructions_have_no_separate_post_link_or_color_markers(self):
         requests = (
@@ -3496,16 +3496,14 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_source_rules_cover_independent_and_composite_stories(self):
         rules = collector.SOURCE_RULES
-        self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", rules)
-        self.assertIn("Строка источника должна быть последней строкой сюжета", rules)
-        self.assertIn("покрывать все существенные утверждения", rules)
-        self.assertIn("иначе раздели материал на отдельные сюжеты или пункты", rules)
-        self.assertIn("ставь источник непосредственно после каждого события", rules)
-        self.assertIn("не собирай общий список ссылок в конце блока", rules)
-        self.assertIn("Пункты «Главное за период» могут не дублировать ссылки", rules)
-        self.assertIn("2–3 ключевые ссылки", rules)
+        self.assertIn("Каждый самостоятельный фактический сюжет завершай строкой источника", rules)
+        self.assertIn("После строки источника не добавляй фактов", rules)
+        self.assertIn("источники должны покрывать существенные утверждения", rules)
+        self.assertIn("иначе раздели сюжет", rules)
+        self.assertIn("В «Коротко» ставь источник после каждого события", rules)
+        self.assertIn("«Главное за период» может не дублировать ссылки", rules)
+        self.assertIn("для составного — 2–3 ключевых", rules)
         self.assertEqual(rules.count("Каждый самостоятельный фактический сюжет"), 1)
-        self.assertEqual(rules.count("Строка источника должна быть последней строкой сюжета"), 1)
         self.assertNotIn("не переходи к следующему заголовку или самостоятельному сюжету", rules)
         self.assertNotIn("Источник ставь после соответствующего сюжета или пункта", rules)
 
