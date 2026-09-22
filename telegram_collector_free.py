@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.5"
+DIGEST_PROFILE_VERSION = "8.6"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -5963,6 +5963,120 @@ def _event_candidate_ref(message, retained_as=None):
     return result
 
 
+def _event_candidate_named_token(fragment):
+    """Return one high-confidence person-like proper token from a short fragment."""
+    tokens = re.findall(
+        r"[A-ZА-ЯЁІЇЄҐ][^\W\d_]*(?:[’'\-][A-ZА-ЯЁІЇЄҐa-zа-яёіїєґ][^\W\d_]*)*",
+        str(fragment or ""),
+        flags=re.UNICODE,
+    )
+    tokens = [
+        token
+        for token in tokens
+        if len(token) >= 4 and not token.isupper()
+    ]
+    if not tokens:
+        return None
+    normalized = normalize_search_token(tokens[-1])
+    return search_stem_prefix(normalized) or None
+
+
+def _event_candidate_meeting_participants(message):
+    """
+    Extract an ordered (main participant, counterpart) pair only from explicit
+    meeting/talk wording. This is deliberately small and deterministic: it is
+    used solely to veto a proven false-positive current-message reply edge.
+    """
+    text = unicodedata.normalize(
+        "NFKC",
+        str(message.get("text") or ""),
+    )[:320]
+    if not text:
+        return None
+
+    # RU/UA: "A встретился/зустрівся с/з B".
+    match = re.search(
+        r"(?P<before>.{0,100}?)\b(?:встрет\w*|зустр\w*)\b\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        actor = _event_candidate_named_token(match.group("before"))
+        counterpart_fragment = re.split(
+            r"\s+(?:в|у|на|під|под|біля|около|at|in|on|during)\s+",
+            match.group("after"),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        counterpart = _event_candidate_named_token(counterpart_fragment)
+        if actor and counterpart and actor != counterpart:
+            return (actor, counterpart)
+
+    # EN: "A will meet/met/meets [with] B".
+    match = re.search(
+        r"(?P<before>.{0,100}?)\b(?:will\s+meet|met|meets?)\b\s+"
+        r"(?:with\s+)?(?P<after>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        actor = _event_candidate_named_token(match.group("before"))
+        counterpart_fragment = re.split(
+            r"\s+(?:at|in|on|during|after|before|where|who|which)\s+",
+            match.group("after"),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        counterpart = _event_candidate_named_token(counterpart_fragment)
+        if actor and counterpart and actor != counterpart:
+            return (actor, counterpart)
+
+    # RU/UA/EN joint subject: "A и/та/and B проведут встречу / will meet".
+    match = re.search(
+        r"(?P<subjects>[^\n.!?]{1,140}?)\s+\b(?:"
+        r"провед\w*\s+(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)"
+        r"|(?:will\s+)?meet|hold\w*\s+(?:a\s+)?meeting)\b",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        parts = re.split(
+            r"\s+(?:и|та|and|&)\s+",
+            match.group("subjects"),
+            flags=re.IGNORECASE,
+        )
+        if len(parts) >= 2:
+            actor = _event_candidate_named_token(parts[-2])
+            counterpart = _event_candidate_named_token(parts[-1])
+            if actor and counterpart and actor != counterpart:
+                return (actor, counterpart)
+
+    # RU/UA: "A проведёт встречу/переговоры с B".
+    match = re.search(
+        r"(?P<before>.{0,100}?)\bпровед\w*\s+"
+        r"(?:встреч\w*|зустріч\w*|переговор\w*|перемов\w*)\s+"
+        r"(?:с|со|з|зі|із)\s+(?P<after>[^\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        actor = _event_candidate_named_token(match.group("before"))
+        counterpart = _event_candidate_named_token(match.group("after"))
+        if actor and counterpart and actor != counterpart:
+            return (actor, counterpart)
+
+    return None
+
+
+def _event_candidate_reply_counterparty_diverges(message, target_message):
+    left = _event_candidate_meeting_participants(message)
+    right = _event_candidate_meeting_participants(target_message)
+    if not left or not right:
+        return False
+    return left[0] == right[0] and left[1] != right[1]
+
+
 def build_event_candidates(current_messages):
     """
     Deterministic CURRENT -> CURRENT coverage layer for the AI-facing export.
@@ -6103,12 +6217,19 @@ def build_event_candidates(current_messages):
                 int(message.get("channel_id") or 0),
                 int(reply_to),
             ))
-            union(
-                key,
-                target,
-                "strong_source",
-                "reply_to_current_message",
-            )
+            if not (
+                target
+                and _event_candidate_reply_counterparty_diverges(
+                    message,
+                    by_key[target],
+                )
+            ):
+                union(
+                    key,
+                    target,
+                    "strong_source",
+                    "reply_to_current_message",
+                )
 
         for ref in message.get("similar_message_refs", []) or []:
             if isinstance(ref, str) and ref in by_key:
