@@ -69,7 +69,7 @@
 - [x] Release ZIP проверяется против whitelist `release_manifest.json` и не включает пользовательские session/credentials/db/settings/logs/дайджесты.
 - [x] Clean install и in-place update уже покрыты реальной Windows CI-проверкой с сохранением пользовательского состояния.
 - [x] Базовый кандидат до MTProto-hardening прошёл полный CI: 154 offline regression tests, сборку release-кандидата, clean install и in-place update.
-- [ ] MTProto-hardening кандидат проходит обновлённый полный CI после добавления regression tests.
+- [x] MTProto-hardening кандидат прошёл полный CI: **161 offline regression tests**, compile/import, проверку launcher, clean install, in-place update, точный состав release ZIP и загрузку verified artifact.
 - [ ] На рабочем компьютере после обновления выполнен smoke-цикл `запуск → 24-часовой дайджест → тематический поиск`.
 - [ ] Финальный ZIP и SHA-256 подготовлены.
 - [ ] Версия помечена Stable только после реальных прогонов на 50 и финальной приёмки.
