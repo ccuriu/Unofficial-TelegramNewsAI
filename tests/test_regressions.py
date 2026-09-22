@@ -108,13 +108,11 @@ class OfflineRegressionTests(unittest.TestCase):
             collector.inter_channel_delay_seconds(self.settings, 50),
             0.25,
         )
-        self.assertEqual(
-            collector.inter_channel_delay_seconds(self.settings, 51),
-            0.25,
-        )
-        self.assertEqual(
-            collector.inter_channel_delay_seconds(self.settings, 101),
-            0.5,
+        self.assertEqual(collector.MAX_SELECTED_CHANNELS, 50)
+        self.assertNotIn("bulk_channel_threshold", collector.DEFAULT_SETTINGS)
+        self.assertNotIn(
+            "bulk_inter_channel_delay_seconds",
+            collector.DEFAULT_SETTINGS,
         )
         self.assertEqual(
             collector.DEFAULT_SETTINGS["telethon_flood_sleep_threshold_seconds"],
@@ -127,6 +125,33 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertTrue(
             collector.DEFAULT_SETTINGS["stop_on_any_flood_wait"]
         )
+
+    def test_sync_all_channels_rejects_more_than_product_limit_before_network(self):
+        channels = [
+            {
+                "id": index,
+                "name": f"Channel {index}",
+                "username": f"channel_{index}",
+                "entity": index,
+            }
+            for index in range(1, collector.MAX_SELECTED_CHANNELS + 2)
+        ]
+        with patch.object(
+            collector,
+            "sync_channel_with_retries",
+            AsyncMock(),
+        ) as mocked_sync:
+            with self.assertRaisesRegex(ValueError, "максимум 50"):
+                asyncio.run(
+                    collector.sync_all_channels(
+                        object(),
+                        self.connection,
+                        channels,
+                        24,
+                        self.settings,
+                    )
+                )
+        mocked_sync.assert_not_awaited()
 
     def test_history_wait_time_cannot_be_disabled_accidentally(self):
         settings = dict(self.settings)
@@ -562,6 +587,90 @@ class OfflineRegressionTests(unittest.TestCase):
         mocked_resolve.assert_awaited_once_with(
             client,
             "https://t.me/public_channel",
+        )
+
+    def test_public_channel_prompt_stops_at_product_limit_without_network(self):
+        existing = [
+            {
+                "id": index,
+                "name": f"Channel {index}",
+                "username": f"channel_{index}",
+            }
+            for index in range(1, collector.MAX_SELECTED_CHANNELS + 1)
+        ]
+        with patch.object(
+            collector,
+            "resolve_public_channel",
+            AsyncMock(),
+        ) as mocked_resolve:
+            result = asyncio.run(
+                collector.prompt_add_public_channels(
+                    object(),
+                    existing,
+                )
+            )
+        self.assertEqual(len(result), collector.MAX_SELECTED_CHANNELS)
+        mocked_resolve.assert_not_awaited()
+
+    def test_saved_selection_over_limit_is_blocked_before_telegram_restore(self):
+        saved = [
+            {
+                "id": index,
+                "name": f"Channel {index}",
+                "username": f"channel_{index}",
+            }
+            for index in range(1, collector.MAX_SELECTED_CHANNELS + 2)
+        ]
+        with patch.object(
+            collector,
+            "load_selection",
+            return_value=saved,
+        ):
+            with patch.object(
+                collector,
+                "restore_saved_selection_from_session",
+                AsyncMock(),
+            ) as mocked_restore:
+                result = asyncio.run(
+                    collector.resolve_channels(
+                        object(),
+                        skip_menu=True,
+                    )
+                )
+        self.assertEqual(result, [])
+        mocked_restore.assert_not_awaited()
+
+    def test_subscription_selection_rejects_51_and_accepts_50(self):
+        subscribed = [
+            SimpleNamespace(
+                name=f"Channel {index}",
+                entity=SimpleNamespace(
+                    id=index,
+                    username=f"channel_{index}",
+                ),
+            )
+            for index in range(1, 52)
+        ]
+        with patch(
+            "builtins.input",
+            side_effect=["all", "1-50"],
+        ):
+            with patch.object(
+                collector,
+                "prompt_add_public_channels",
+                AsyncMock(side_effect=lambda _client, items: items),
+            ):
+                with patch.object(collector, "save_selection"):
+                    result = asyncio.run(
+                        collector.select_from_subscriptions(
+                            object(),
+                            subscribed,
+                        )
+                    )
+        self.assertEqual(len(result), 50)
+        self.assertEqual(
+            {int(item["id"]) for item in result},
+            set(range(1, 51)),
         )
 
     def test_public_channel_prompt_does_not_reparse_number_range(self):
@@ -1017,6 +1126,67 @@ class OfflineRegressionTests(unittest.TestCase):
             prefix + "Комментарий дал Иван Сидоров.",
         )
         self.assertEqual((len(kept), exact, near), (2, 0, 0))
+
+    def test_multilingual_text_survives_collection_sqlite_search_and_ai_export(self):
+        samples = {
+            1: "Україна посилює енергосистему перед зимою",
+            2: "White House announced a new ceasefire framework",
+        }
+        for message_id, text in samples.items():
+            msg = SimpleNamespace(
+                id=message_id,
+                message=text,
+                date=self.now,
+                edit_date=None,
+                media=None,
+                reactions=None,
+                replies=None,
+                fwd_from=None,
+                grouped_id=None,
+                reply_to_msg_id=None,
+                post_author=None,
+                views=None,
+                forwards=None,
+                buttons=None,
+            )
+            prepared = collector.make_message(
+                self.channel,
+                msg,
+                self.settings,
+            )
+            self.assertEqual(prepared["text"], text)
+            collector.upsert_message(self.connection, prepared)
+
+        self.connection.commit()
+
+        english_results = self.search("ceasefire")["direct_results"]
+        self.assertEqual(
+            [item["message_id"] for item in english_results],
+            [2],
+        )
+
+        exported = collector.load_messages_for_export(
+            self.connection,
+            [self.channel],
+            24,
+            None,
+            self.settings,
+        )
+        exported_by_id = {
+            int(item["message_id"]): item["text"]
+            for item in exported
+        }
+        self.assertEqual(exported_by_id, samples)
+
+        json_text = __import__("json").dumps(
+            [
+                collector.prepare_message_for_ai(item)
+                for item in exported
+            ],
+            ensure_ascii=False,
+        )
+        self.assertIn(samples[1], json_text)
+        self.assertIn(samples[2], json_text)
 
     def test_eu_alias_is_searchable(self):
         self.add_message(1, "ЄС согласовал новое решение")
@@ -2800,6 +2970,18 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("similar_message_refs", request)
         self.assertIn("это не доказательство одного события", request)
 
+    def test_digest_request_handles_mixed_languages_without_separate_buckets(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("на языке запроса пользователя", request)
+        self.assertIn("если язык запроса не указан или неясен, пиши по-русски", request)
+        self.assertIn("Иноязычные публикации переводи по смыслу", request)
+        self.assertIn("сохраняя имена, числа, цитируемые факты", request)
+        self.assertIn("Не разделяй источники по языку", request)
+        self.assertIn(
+            "русско-, украино- и англоязычные сообщения объединяй в один сюжет",
+            request,
+        )
+
     def test_digest_request_keeps_adaptive_compact_structure(self):
         request = collector.DIGEST_REQUEST
         self.assertIn("«Главное за период»", request)
@@ -2887,7 +3069,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.1")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.2")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -2935,6 +3117,20 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertNotIn("--setup-semantic", readme)
+
+    def test_readme_and_testing_plan_use_50_source_product_limit(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        testing = (
+            ROOT / "docs" / "TELEGRAM_API_TESTING.md"
+        ).read_text(encoding="utf-8")
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("максимум **50 выбранных", readme)
+        self.assertIn("максимум 50", testing)
+        self.assertNotIn("около 60 каналов", testing)
+        self.assertNotIn("около 75 каналов", testing)
+        self.assertNotIn("около 100 каналов", testing)
+        self.assertNotIn("свыше 100 каналов", readme)
+        self.assertNotIn("свыше 100 каналов", security)
 
     def test_user_facing_source_documentation_matches_fallback_order(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
