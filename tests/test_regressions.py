@@ -3504,7 +3504,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("используй ровно эту строку", rules)
         self.assertIn("Печатай URL обычным текстом, не Markdown-ссылкой", rules)
         self.assertIn("**Источник:** Канал — https://t.me/...", rules)
-        self.assertIn("Google redirect", rules)
+        self.assertIn("Google или redirect-ссылкой", rules)
         self.assertIn("utm_source", rules)
         self.assertIn("сокращение", rules)
         self.assertIn("нормализация", rules)
@@ -3524,11 +3524,11 @@ class OfflineRegressionTests(unittest.TestCase):
             rules,
         )
         for marker in (
-            "опровержение",
-            "блокировка",
-            "уточнение",
-            "отмена",
-            "смена статуса",
+            "опровергает",
+            "блокирует",
+            "уточняет",
+            "отменяет",
+            "меняет статус",
         ):
             self.assertIn(marker, rules)
         self.assertIn("Не повышай уверенность относительно источника", rules)
