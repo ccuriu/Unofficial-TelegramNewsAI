@@ -227,8 +227,9 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        # Первый sync больше не делает второй полностью дублирующий refresh.
-        self.assertEqual(len(client.calls), 1)
+        # Первый sync сохраняет отдельный refresh ради правок/метрик,
+        # которые могли измениться во время первоначального backfill.
+        self.assertEqual(len(client.calls), 2)
         expected = collector.history_request_wait_seconds(
             self.settings
         )
@@ -491,6 +492,7 @@ class OfflineRegressionTests(unittest.TestCase):
         for label, error in (
             ("peer_flood", RuntimeError("PEER_FLOOD")),
             ("session_revoked", SessionRevokedError("revoked")),
+            ("frozen_account", RuntimeError("FROZEN_METHOD_INVALID")),
         ):
             with self.subTest(signal=label):
                 with patch.object(
