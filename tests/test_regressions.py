@@ -3494,18 +3494,52 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("date_local", request)
         self.assertIn("если надёжно определить интервал нельзя, не придумывай", request)
 
-    def test_source_rules_cover_independent_and_composite_stories(self):
+    def test_source_rules_use_plain_literal_urls(self):
         rules = collector.SOURCE_RULES
-        self.assertIn("Каждый самостоятельный фактический сюжет завершай строкой источника", rules)
-        self.assertIn("После строки источника не добавляй фактов", rules)
+        self.assertIn("Каждый самостоятельный фактический сюжет", rules)
         self.assertIn("источники должны покрывать существенные утверждения", rules)
         self.assertIn("иначе раздели сюжет", rules)
         self.assertIn("В «Коротко» ставь источник после каждого события", rules)
         self.assertIn("«Главное за период» может не дублировать ссылки", rules)
+        self.assertIn("используй ровно эту строку", rules)
+        self.assertIn("Печатай URL обычным текстом, не Markdown-ссылкой", rules)
+        self.assertIn("**Источник:** Канал — https://t.me/...", rules)
+        self.assertIn("Google redirect", rules)
+        self.assertIn("utm_source", rules)
+        self.assertIn("сокращение", rules)
+        self.assertIn("нормализация", rules)
+        self.assertIn("изменение query", rules)
+        self.assertIn("восстановление по памяти", rules)
+        self.assertIn("literal SOURCE_URL", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
-        self.assertEqual(rules.count("Каждый самостоятельный фактический сюжет"), 1)
-        self.assertNotIn("не переходи к следующему заголовку или самостоятельному сюжету", rules)
-        self.assertNotIn("Источник ставь после соответствующего сюжета или пункта", rules)
+        self.assertNotIn("[Канал](url)", rules)
+        self.assertNotIn("[Канал A](url)", rules)
+
+    def test_editorial_rules_prioritize_late_updates_preserve_certainty_and_avoid_topic_merge(self):
+        rules = collector.EDITORIAL_PRINCIPLES
+        self.assertIn("самое позднее состояние по времени", rules)
+        self.assertIn("позднее уточнение имеет приоритет", rules)
+        self.assertIn(
+            "Первоначально сообщалось…, позже выяснилось…",
+            rules,
+        )
+        for marker in (
+            "опровержение",
+            "блокировка",
+            "уточнение",
+            "отмена",
+            "смена статуса",
+        ):
+            self.assertIn(marker, rules)
+        self.assertIn("Не повышай уверенность относительно источника", rules)
+        self.assertIn("«возможно»", rules)
+        self.assertIn("«по данным источника»", rules)
+        self.assertIn("«предположительно»", rules)
+        self.assertIn(
+            "общая тема, страна, организация или война не означают одно событие",
+            rules,
+        )
+
 
     def test_digest_isolated_from_user_profile_and_chat_history(self):
         rules = collector.EDITORIAL_PRINCIPLES
@@ -3530,12 +3564,12 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.3")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.4")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
 
-    def test_ai_markdown_preserves_all_current_messages_unicode_media_and_urls(self):
+    def test_ai_markdown_is_newest_first_and_omits_textless_media_only(self):
         payload = {
             "meta": {
                 "digest_profile_version": collector.DIGEST_PROFILE_VERSION,
@@ -3556,20 +3590,21 @@ class OfflineRegressionTests(unittest.TestCase):
                     "channel_id": 2,
                     "message_id": 20,
                     "message_key": "2:20",
-                    "date_local": "2026-09-22T11:00:00+03:00",
+                    "date_local": "2026-09-22T12:00:00+03:00",
                     "channel": "Український канал",
                     "username": "ua_channel",
                     "telegram_url": "https://t.me/ua_channel/20",
-                    "text": "Український текст з літерами ї, є та ґ.",
+                    "text": "Змістовний підпис до відео.",
+                    "media": {"type": "video"},
                 },
                 {
                     "channel_id": 3,
                     "message_id": 30,
                     "message_key": "3:30",
-                    "date_local": "2026-09-22T12:00:00+03:00",
-                    "channel": "English channel",
-                    "username": "en_channel",
-                    "telegram_url": "https://t.me/en_channel/30",
+                    "date_local": "2026-09-22T11:00:00+03:00",
+                    "channel": "Media only",
+                    "username": "media_only",
+                    "telegram_url": "https://t.me/media_only/30",
                     "text": "[Медиа без подписи: photo]",
                     "media": {"type": "photo"},
                 },
@@ -3581,20 +3616,34 @@ class OfflineRegressionTests(unittest.TestCase):
 
         rendered = collector.render_ai_friendly_markdown(payload)
 
-        self.assertIn("CURRENT_MESSAGES: 3", rendered)
-        for ref in ("[MESSAGE 1:10]", "[MESSAGE 2:20]", "[MESSAGE 3:30]"):
-            self.assertEqual(rendered.count(ref), 1)
+        self.assertIn("CURRENT_MESSAGES: 2", rendered)
+        self.assertIn("OMITTED_MEDIA_ONLY: 1", rendered)
+        self.assertIn(
+            "LOCAL_INTERVAL: 2026-09-22T10:00:00+03:00 — "
+            "2026-09-22T12:00:00+03:00",
+            rendered,
+        )
+        self.assertEqual(rendered.count("[MESSAGE 1:10]"), 1)
+        self.assertEqual(rendered.count("[MESSAGE 2:20]"), 1)
+        self.assertNotIn("[MESSAGE 3:30]", rendered)
+        self.assertNotIn("[Медиа без подписи: photo]", rendered)
         self.assertIn("Русский текст без сокращения.", rendered)
-        self.assertIn("Український текст з літерами ї, є та ґ.", rendered)
-        self.assertIn("[Медиа без подписи: photo]", rendered)
-        self.assertIn("MEDIA_ONLY: true", rendered)
+        self.assertIn("Змістовний підпис до відео.", rendered)
+        self.assertIn("MEDIA: video", rendered)
+        self.assertIn("DATE_LOCAL: 2026-09-22T10:00:00+03:00", rendered)
+        self.assertIn("DATE_LOCAL: 2026-09-22T12:00:00+03:00", rendered)
+        self.assertLess(
+            rendered.index("[MESSAGE 2:20]"),
+            rendered.index("[MESSAGE 1:10]"),
+        )
         self.assertIn(
             "SOURCE_URL: https://t.me/ru_channel/10?x=LiteralCase",
             rendered,
         )
         self.assertNotIn("google.com", rendered.lower())
 
-    def test_save_output_keeps_canonical_json_complete_and_writes_ai_markdown(self):
+
+    def test_save_output_keeps_canonical_media_only_but_ai_markdown_omits_it(self):
         messages = [
             {
                 "channel_id": 1,
@@ -3602,8 +3651,8 @@ class OfflineRegressionTests(unittest.TestCase):
                 "message_key": "1:101",
                 "channel": "Test",
                 "username": "test",
-                "date_utc": collector.iso_utc(self.now - timedelta(minutes=2)),
-                "date_local": collector.iso_local(self.now - timedelta(minutes=2)),
+                "date_utc": collector.iso_utc(self.now - timedelta(minutes=3)),
+                "date_local": collector.iso_local(self.now - timedelta(minutes=3)),
                 "telegram_url": "https://t.me/test/101",
                 "text": "Первое содержательное сообщение.",
                 "in_selected_period": True,
@@ -3615,10 +3664,25 @@ class OfflineRegressionTests(unittest.TestCase):
                 "message_key": "1:102",
                 "channel": "Test",
                 "username": "test",
+                "date_utc": collector.iso_utc(self.now - timedelta(minutes=2)),
+                "date_local": collector.iso_local(self.now - timedelta(minutes=2)),
+                "telegram_url": "https://t.me/test/102",
+                "text": "Содержательная подпись к видео.",
+                "media": {"type": "video"},
+                "in_selected_period": True,
+                "change_status": "first_digest",
+            },
+            {
+                "channel_id": 1,
+                "message_id": 103,
+                "message_key": "1:103",
+                "channel": "Test",
+                "username": "test",
                 "date_utc": collector.iso_utc(self.now - timedelta(minutes=1)),
                 "date_local": collector.iso_local(self.now - timedelta(minutes=1)),
-                "telegram_url": "https://t.me/test/102",
-                "text": "Второе содержательное сообщение.",
+                "telegram_url": "https://t.me/test/103",
+                "text": "[Медиа без подписи: photo]",
+                "media": {"type": "photo"},
                 "in_selected_period": True,
                 "change_status": "first_digest",
             },
@@ -3652,17 +3716,24 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
         canonical = json.loads(latest.read_text(encoding="utf-8"))
-        self.assertEqual(len(canonical["news_messages"]), 2)
+        self.assertEqual(len(canonical["news_messages"]), 3)
         self.assertEqual(
             [item["message_key"] for item in canonical["news_messages"]],
-            ["1:101", "1:102"],
+            ["1:101", "1:102", "1:103"],
+        )
+        self.assertEqual(
+            canonical["news_messages"][2]["text"],
+            "[Медиа без подписи: photo]",
         )
         self.assertTrue(collector.AI_LATEST_FILE.exists())
         ai_text = collector.AI_LATEST_FILE.read_text(encoding="utf-8")
         self.assertIn("[MESSAGE 1:101]", ai_text)
         self.assertIn("[MESSAGE 1:102]", ai_text)
+        self.assertNotIn("[MESSAGE 1:103]", ai_text)
         self.assertIn("Первое содержательное сообщение.", ai_text)
-        self.assertIn("Второе содержательное сообщение.", ai_text)
+        self.assertIn("Содержательная подпись к видео.", ai_text)
+        self.assertNotIn("[Медиа без подписи: photo]", ai_text)
+
 
     def test_ai_export_filters_recurring_service_urls_but_keeps_article_urls_literal(self):
         message = {
