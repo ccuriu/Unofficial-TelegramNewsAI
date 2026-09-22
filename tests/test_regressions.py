@@ -35,6 +35,7 @@ class OfflineRegressionTests(unittest.TestCase):
         collector.RAW_DIR = collector.ARCHIVE_DIR / "Сырые"
         collector.LOG_DIR = self.directory / "logs"
         collector.LATEST_FILE = collector.OUTPUT_DIR / "ДАЙДЖЕСТ_ПОСЛЕДНИЙ.json"
+        collector.AI_LATEST_FILE = collector.OUTPUT_DIR / "ДАЙДЖЕСТ_ДЛЯ_ИИ.md"
         collector.SEARCH_LATEST_FILE = collector.OUTPUT_DIR / "ПОИСК_ПОСЛЕДНИЙ.json"
         collector.SEARCH_ARCHIVE_DIR = collector.ARCHIVE_DIR / "Поиск"
         self.connection = collector.open_db()
@@ -1990,6 +1991,96 @@ class OfflineRegressionTests(unittest.TestCase):
         ]
         self.assertEqual(len(collector.build_related_groups(messages)), 1)
 
+    def test_recurring_service_url_in_one_channel_does_not_create_related_group(self):
+        service_url = (
+            "https://249860.redirect.appmetrica.yandex.com/"
+            "?appmetrica_tracking_id=245880726195607142&referrer=reattribution%3D1"
+        )
+        messages = [
+            {
+                "channel_id": 100,
+                "channel": "Один канал",
+                "message_id": index,
+                "canonical_urls": [service_url],
+                "origin_key": "url:" + service_url,
+            }
+            for index in range(1, 31)
+        ]
+        self.assertFalse(collector.is_specific_shared_source_url(service_url))
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_same_specific_url_repeated_inside_one_channel_is_not_a_group(self):
+        article_url = "https://example.com/news/concrete-article-2026"
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "canonical_urls": [article_url],
+            },
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 11,
+                "canonical_urls": [article_url],
+            },
+        ]
+        self.assertTrue(collector.is_specific_shared_source_url(article_url))
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_exact_forward_origin_still_groups(self):
+        origin = "telegram_forward:2012559840:7831"
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "origin_key": origin,
+                "canonical_urls": [],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "origin_key": origin,
+                "canonical_urls": [],
+            },
+        ]
+        groups = collector.build_related_groups(messages)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0]["message_refs"]), 2)
+
+    def test_similar_text_without_specific_source_is_not_related_group(self):
+        messages = [
+            {
+                "channel_id": 1,
+                "channel": "Канал A",
+                "message_id": 10,
+                "text": "Очень похожая формулировка одного сообщения",
+                "canonical_urls": [],
+            },
+            {
+                "channel_id": 2,
+                "channel": "Канал B",
+                "message_id": 20,
+                "text": "Очень похожая формулировка другого сообщения",
+                "canonical_urls": [],
+            },
+        ]
+        self.assertEqual(collector.build_related_groups(messages), [])
+
+    def test_generic_profile_category_and_query_only_urls_are_not_specific(self):
+        for url in (
+            "https://example.com/profile/reporter",
+            "https://example.com/category/world",
+            "https://example.com?campaign=always-on",
+            "https://example.com/subscribe/newsletter",
+        ):
+            self.assertFalse(
+                collector.is_specific_shared_source_url(url),
+                msg=url,
+            )
+
     def test_max_post_with_material_identifier_remains_specific_source(self):
         post_url = "https://max.ru/channel_vmax/AZ9FDVpHASw"
         self.assertTrue(collector.is_specific_shared_source_url(post_url))
@@ -2996,7 +3087,7 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
     def test_related_group_member_keeps_telegram_url(self):
-        common_url = "https://example.test/source"
+        common_url = "https://example.test/news/source-2026"
         messages = [
             {
                 "channel_id": 1,
@@ -3222,13 +3313,15 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_request_uses_telegram_urls_for_sources(self):
         request = collector.DIGEST_REQUEST
+        self.assertIn("SOURCE_URL", request)
         self.assertIn("telegram_url", request)
         self.assertIn("channel_url", request)
         self.assertIn("Markdown-ссылкой", request)
-        self.assertIn("При наличии telegram_url", request)
-        self.assertIn("иначе используй channel_url", request)
-        self.assertIn("при отсутствии обеих ссылок", request)
-        self.assertIn("URL не придумывай", request)
+        self.assertIn("копируй ДОСЛОВНО", request)
+        self.assertIn("Запрещено придумывать URL", request)
+        self.assertIn("Google/другим redirect", request)
+        self.assertIn("«исправлять» URL по памяти", request)
+        self.assertIn("исходную literal URL", request)
         self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", request)
         self.assertIn("2–3 ключевые ссылки", request)
 
@@ -3280,8 +3373,10 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("различай прямое сообщение", request)
         self.assertIn("независимое подтверждение", request)
         self.assertIn("редакционный вывод", request)
-        self.assertIn("не достраивай отсутствующие факты", request)
-        self.assertIn("автора действия, мотив, цель и причинность", request)
+        self.assertIn("не используй общие знания модели", request)
+        self.assertIn("не добавляй существенные факты, географию", request)
+        self.assertIn("участников, мотивы, последствия или причинность", request)
+        self.assertIn("если данных для вывода недостаточно", request)
         self.assertIn("перепечатки одного исходного сообщения не считай независимыми подтверждениями", request)
         self.assertIn("количество публикаций само по себе не делает сюжет важнее", request)
         for confidence in (
@@ -3303,7 +3398,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("сохраняя имена, числа, цитируемые факты", request)
         self.assertIn("Не разделяй источники по языку", request)
         self.assertIn(
-            "русско-, украино- и англоязычные сообщения объединяй в один сюжет",
+            "русско-, украино- и англоязычные сообщения одного события объединяй в один сюжет",
             request,
         )
 
@@ -3313,9 +3408,27 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не ставь перед ним второй абзац с тем же резюме", request)
         self.assertIn("Однотипные оперативные предупреждения одного сюжета объединяй", request)
         self.assertIn("changes_since_previous_digest.comparison_available=true", request)
-        self.assertIn("глубину определяй количеством реально новой информации", request)
+        self.assertIn("глубину каждого сюжета определяй количеством реально новой информации", request)
+        self.assertIn("не ограничивай этим число сюжетов", request)
+        self.assertIn("собери в «Коротко» вместо того, чтобы опустить их", request)
         self.assertNotIn("при среднем объёме", request.lower())
         self.assertNotIn("при большом", request.lower())
+
+    def test_digest_request_is_completeness_first(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn("Сначала учти весь набор текущих сообщений", request)
+        self.assertIn("Не заканчивай дайджест после нескольких самых заметных историй", request)
+        self.assertIn("Каждый самостоятельный содержательно значимый сюжет", request)
+        self.assertIn("полнота важной повестки важнее искусственной краткости", request)
+        self.assertIn("Одиночное важное сообщение нельзя терять", request)
+
+    def test_related_groups_are_only_a_hint_in_prompt(self):
+        request = collector.DIGEST_REQUEST
+        self.assertIn(
+            "related_message_groups — только подсказка о возможном общем источнике",
+            request,
+        )
+        self.assertIn("не приказ объединять сообщения в одно событие", request)
 
     def test_digest_comparison_never_replaces_full_period(self):
         request = collector.DIGEST_REQUEST
@@ -3394,10 +3507,159 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.2")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.3")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
+
+    def test_ai_markdown_preserves_all_current_messages_unicode_media_and_urls(self):
+        payload = {
+            "meta": {
+                "digest_profile_version": collector.DIGEST_PROFILE_VERSION,
+                "recommended_digest_request": collector.DIGEST_REQUEST,
+            },
+            "news_messages": [
+                {
+                    "channel_id": 1,
+                    "message_id": 10,
+                    "message_key": "1:10",
+                    "date_local": "2026-09-22T10:00:00+03:00",
+                    "channel": "Русский канал",
+                    "username": "ru_channel",
+                    "telegram_url": "https://t.me/ru_channel/10?x=LiteralCase",
+                    "text": "Русский текст без сокращения.",
+                },
+                {
+                    "channel_id": 2,
+                    "message_id": 20,
+                    "message_key": "2:20",
+                    "date_local": "2026-09-22T11:00:00+03:00",
+                    "channel": "Український канал",
+                    "username": "ua_channel",
+                    "telegram_url": "https://t.me/ua_channel/20",
+                    "text": "Український текст з літерами ї, є та ґ.",
+                },
+                {
+                    "channel_id": 3,
+                    "message_id": 30,
+                    "message_key": "3:30",
+                    "date_local": "2026-09-22T12:00:00+03:00",
+                    "channel": "English channel",
+                    "username": "en_channel",
+                    "telegram_url": "https://t.me/en_channel/30",
+                    "text": "[Медиа без подписи: photo]",
+                    "media": {"type": "photo"},
+                },
+            ],
+            "operational_messages": [],
+            "continuity_context": {"messages": []},
+            "changes_since_previous_digest": {"outside_period_changes": []},
+        }
+
+        rendered = collector.render_ai_friendly_markdown(payload)
+
+        self.assertIn("CURRENT_MESSAGES: 3", rendered)
+        for ref in ("[MESSAGE 1:10]", "[MESSAGE 2:20]", "[MESSAGE 3:30]"):
+            self.assertEqual(rendered.count(ref), 1)
+        self.assertIn("Русский текст без сокращения.", rendered)
+        self.assertIn("Український текст з літерами ї, є та ґ.", rendered)
+        self.assertIn("[Медиа без подписи: photo]", rendered)
+        self.assertIn("MEDIA_ONLY: true", rendered)
+        self.assertIn(
+            "SOURCE_URL: https://t.me/ru_channel/10?x=LiteralCase",
+            rendered,
+        )
+        self.assertNotIn("google.com", rendered.lower())
+
+    def test_save_output_keeps_canonical_json_complete_and_writes_ai_markdown(self):
+        messages = [
+            {
+                "channel_id": 1,
+                "message_id": 101,
+                "message_key": "1:101",
+                "channel": "Test",
+                "username": "test",
+                "date_utc": collector.iso_utc(self.now - timedelta(minutes=2)),
+                "date_local": collector.iso_local(self.now - timedelta(minutes=2)),
+                "telegram_url": "https://t.me/test/101",
+                "text": "Первое содержательное сообщение.",
+                "in_selected_period": True,
+                "change_status": "first_digest",
+            },
+            {
+                "channel_id": 1,
+                "message_id": 102,
+                "message_key": "1:102",
+                "channel": "Test",
+                "username": "test",
+                "date_utc": collector.iso_utc(self.now - timedelta(minutes=1)),
+                "date_local": collector.iso_local(self.now - timedelta(minutes=1)),
+                "telegram_url": "https://t.me/test/102",
+                "text": "Второе содержательное сообщение.",
+                "in_selected_period": True,
+                "change_status": "first_digest",
+            },
+        ]
+        sync_stats = {
+            "new_messages_saved": 0,
+            "content_changed_messages_refreshed": 0,
+            "metrics_changed_messages_refreshed": 0,
+            "migrated_messages": 0,
+            "telegram_messages_scanned": 0,
+            "failed_channels": 0,
+            "successful_channels": 1,
+            "channel_results": [],
+            "history_completeness": {"complete": True},
+            "self_diagnostics": {},
+        }
+
+        latest, _, _, _ = collector._v4_save_output(
+            messages,
+            messages,
+            [],
+            0,
+            0,
+            24,
+            [self.channel],
+            sync_stats,
+            None,
+            None,
+            [],
+            self.settings,
+        )
+
+        canonical = json.loads(latest.read_text(encoding="utf-8"))
+        self.assertEqual(len(canonical["news_messages"]), 2)
+        self.assertEqual(
+            [item["message_key"] for item in canonical["news_messages"]],
+            ["1:101", "1:102"],
+        )
+        self.assertTrue(collector.AI_LATEST_FILE.exists())
+        ai_text = collector.AI_LATEST_FILE.read_text(encoding="utf-8")
+        self.assertIn("[MESSAGE 1:101]", ai_text)
+        self.assertIn("[MESSAGE 1:102]", ai_text)
+        self.assertIn("Первое содержательное сообщение.", ai_text)
+        self.assertIn("Второе содержательное сообщение.", ai_text)
+
+    def test_ai_export_filters_recurring_service_urls_but_keeps_article_urls_literal(self):
+        message = {
+            "channel_id": 1,
+            "message_id": 1,
+            "message_key": "1:1",
+            "channel": "Test",
+            "date_local": "2026-09-22T10:00:00+03:00",
+            "telegram_url": "https://t.me/test/1",
+            "text": "Текст",
+            "external_urls": [
+                "https://249860.redirect.appmetrica.yandex.com/?appmetrica_tracking_id=123",
+                "https://example.com/news/concrete-article-2026?utm_source=telegram",
+            ],
+        }
+        urls = collector._ai_material_external_urls(message)
+        self.assertEqual(
+            urls,
+            ["https://example.com/news/concrete-article-2026?utm_source=telegram"],
+        )
 
     def test_export_contract_keeps_user_controlled_ai_handoff(self):
         source = SOURCE.read_text(encoding="utf-8")
