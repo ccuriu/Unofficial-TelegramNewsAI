@@ -16,10 +16,12 @@ TelegramNewsAI рассчитан на **максимум 50 выбранных 
 
 - `Telethon.flood_sleep_threshold = 0`: FloodWait не скрывается внутри библиотеки;
 - первый `FloodWait` прекращает текущий сетевой этап без автоматического повторения нагрузки;
-- `PEER_FLOOD`, потеря/отзыв сессии, деактивация и сходные защитные сигналы также прекращают соответствующий сетевой этап;
+- `PEER_FLOOD`, frozen/banned, потеря/отзыв сессии, деактивация и сходные account/session-level сигналы также прекращают соответствующий сетевой этап без retry; `PEER_FLOOD` здесь не трактуется как обычный rate-limit чтения истории;
 - обычный запуск сначала использует локальный entity-cache Telethon; полный `get_dialogs(limit=None)` остаётся fallback;
 - скрытая повторная авторизация запрещена;
 - запросы истории выполняются последовательно;
+- штатная межканальная пауза — 1,0 с; это консервативный инженерный default TelegramNewsAI, а не официальный Telegram limit;
+- после каждого обычного sync журнал содержит `API_SAFETY_SUMMARY` с `history_iterators_started`, retry/FloodWait/safety-stop и временем выполнения;
 - параллельный обычный запуск двух копий блокируется системным mutex.
 
 Ни один успешный тест на 50 источниках не отменяет эти правила.
@@ -53,7 +55,7 @@ TelegramNewsAI рассчитан на **максимум 50 выбранных 
 - желательно, чтобы они охватывали несколько разных моментов/дней и хотя бы один запуск после обычного перерыва;
 - не требуется ждать несколько недель, если прогоны стабильны и новых сигналов риска нет.
 
-После каждого запуска фиксируются число каналов, период, результат синхронизации и наличие/отсутствие защитных сигналов.
+После каждого запуска фиксируются число каналов, период, результат синхронизации и `API_SAFETY_SUMMARY`: завершённые/ошибочные каналы, сообщения, логические history-итераторы, retry, FloodWait seconds, safety halt и elapsed time. `history_iterators_started` не считать точным числом внутренних MTProto requests/pages Telethon.
 
 7/30/90-дневные периоды больше не являются отдельной обязательной лестницей Telegram-нагрузки. Их можно проверить функционально по необходимости; если нужная история уже есть локально, такой тест не считается повышением сетевой нагрузки.
 
@@ -89,7 +91,7 @@ SQLite FTS5/LIKE и `continuity_context` не выполняют машинны�
 Повышение нагрузки и повтор тяжёлой операции прекращаются при любом из следующих сигналов:
 
 - `FloodWait`;
-- `PEER_FLOOD` или сходная ошибка ограничения;
+- `PEER_FLOOD` (spam-reported/account-level signal по текущему Telegram errors.json) или сходная защитная ошибка;
 - защитная остановка TelegramNewsAI;
 - потеря или отзыв Telegram-сессии;
 - неожиданная необходимость повторной авторизации;
@@ -115,4 +117,9 @@ SQLite FTS5/LIKE и `continuity_context` не выполняют машинны�
 - Telegram — Creating your Telegram Application: https://core.telegram.org/api/obtaining_api_id
 - Telegram — API Terms: https://core.telegram.org/api/terms
 - Telegram — RPC errors / FLOOD_WAIT: https://core.telegram.org/api/errors
-- Telethon documentation: https://docs.telethon.dev/
+- Telegram — RPC errors database / PEER_FLOOD: https://core.telegram.org/api/errors.json
+- Telegram — Content Licensing / AI Scraping: https://telegram.org/tos/content-licensing
+- Telethon client/entities/sessions: https://docs.telethon.dev/en/stable/modules/client.html
+  https://docs.telethon.dev/en/stable/concepts/entities.html
+  https://docs.telethon.dev/en/stable/modules/sessions.html
+- Research record: TELEGRAM_API_TERMS_RESEARCH_2026-09-22.md

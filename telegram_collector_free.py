@@ -21,6 +21,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+import uuid
 from collections import Counter
 from ctypes import wintypes
 from datetime import datetime, timedelta, timezone
@@ -164,10 +165,11 @@ DEFAULT_SETTINGS = {
     "telethon_flood_sleep_threshold_seconds": 0,
     "stop_on_any_flood_wait": True,
 
-    # Умеренный последовательный профиль для поддерживаемого сценария
-    # максимум из 50 выбранных источников.
+    # Консервативный последовательный профиль для поддерживаемого сценария
+    # максимум из 50 выбранных источников. Это инженерный default проекта,
+    # а не официальный safe limit Telegram.
     "history_request_wait_seconds": 0.5,
-    "inter_channel_delay_seconds": 0.25,
+    "inter_channel_delay_seconds": 1.0,
     "flood_wait_safety_seconds": 5,
 
     "open_output_folder": True,
@@ -228,19 +230,30 @@ def load_settings():
     result = DEFAULT_SETTINGS.copy()
     result.update(data)
 
-    # Однократно смягчаем только точный старый Testing-профиль 5.4.12.
-    # Параметры отдельного режима для 100+ каналов больше не используются:
-    # продуктовый максимум TelegramNewsAI — 50 выбранных источников.
-    if (
+    # Однократно мигрируем только известные штатные Testing-профили.
+    # Пользовательские pacing-значения не переписываем.
+    legacy_bulk_profile = (
         result.get("history_request_wait_seconds") == 1.0
         and result.get("inter_channel_delay_seconds") == 0.75
         and result.get("bulk_channel_threshold") == 50
         and result.get("bulk_inter_channel_delay_seconds") == 1.5
-    ):
+    )
+    legacy_standard_profile = (
+        data.get("history_request_wait_seconds") == 0.5
+        and data.get("inter_channel_delay_seconds") == 0.25
+        and data.get("telethon_flood_sleep_threshold_seconds") == 0
+        and data.get("max_flood_wait_seconds") == 0
+        and data.get("stop_on_any_flood_wait") is True
+        and data.get("refresh_recent_messages") == 50
+        and data.get("refresh_recent_hours") in (2, 2.0)
+    )
+    if legacy_bulk_profile:
         result.update({
             "history_request_wait_seconds": 0.5,
-            "inter_channel_delay_seconds": 0.25,
+            "inter_channel_delay_seconds": 1.0,
         })
+    elif legacy_standard_profile:
+        result["inter_channel_delay_seconds"] = 1.0
     result.pop("bulk_channel_threshold", None)
     result.pop("bulk_inter_channel_delay_seconds", None)
 
@@ -269,7 +282,7 @@ def load_settings():
             0.0,
             min(
                 10.0,
-                float(result.get("inter_channel_delay_seconds", 0.25)),
+                float(result.get("inter_channel_delay_seconds", 1.0)),
             ),
         ),
         "flood_wait_safety_seconds": max(
@@ -366,11 +379,11 @@ def inter_channel_delay_seconds(settings, channel_count):
         normal = float(
             source.get(
                 "inter_channel_delay_seconds",
-                0.25,
+                1.0,
             )
         )
     except (TypeError, ValueError):
-        normal = 0.25
+        normal = 1.0
 
     # channel_count сохраняется в сигнатуре для совместимости и журналирования.
     # Отдельного скрытого профиля для 100+ каналов больше нет.
@@ -403,6 +416,8 @@ SECURITY_RPC_MARKERS = (
     "USERDEACTIVATED",
     "PHONE_NUMBER_BANNED",
     "PHONENUMBERBANNED",
+    "FROZEN_METHOD_INVALID",
+    "FROZEN_PARTICIPANT_MISSING",
     "USER_RESTRICTED",
     "USERRESTRICTED",
     "UNAUTHORIZED",
@@ -3266,6 +3281,95 @@ def register_run(
 # Telegram synchronization
 # ============================================================
 
+def new_api_safety_telemetry(channel_count):
+    return {
+        "sync_id": uuid.uuid4().hex[:12],
+        "channel_count": int(channel_count),
+        "channels_completed": 0,
+        "channels_failed": 0,
+        "messages_scanned": 0,
+        "history_iterators_started": 0,
+        "network_retry_count": 0,
+        "flood_wait": False,
+        "flood_wait_seconds": 0,
+        "safety_halt": False,
+        "halt_reason": None,
+    }
+
+
+def note_history_iterator_started(telemetry):
+    if telemetry is not None:
+        telemetry["history_iterators_started"] = (
+            int(telemetry.get("history_iterators_started", 0)) + 1
+        )
+
+
+def note_network_retry(telemetry):
+    if telemetry is not None:
+        telemetry["network_retry_count"] = (
+            int(telemetry.get("network_retry_count", 0)) + 1
+        )
+
+
+def note_flood_wait(telemetry, seconds):
+    if telemetry is not None:
+        telemetry["flood_wait"] = True
+        telemetry["flood_wait_seconds"] = max(
+            int(telemetry.get("flood_wait_seconds", 0)),
+            max(0, int(seconds or 0)),
+        )
+
+
+def note_safety_halt(telemetry, reason):
+    if telemetry is not None:
+        telemetry["safety_halt"] = True
+        telemetry["halt_reason"] = reason
+
+
+def api_safety_summary_line(overall):
+    api = overall.get("api_safety", {})
+    halt_reason = api.get("halt_reason") or "none"
+    return (
+        "API_SAFETY_SUMMARY | "
+        f"sync_id={api.get('sync_id') or 'unknown'} | "
+        f"channel_count={int(api.get('channel_count', 0))} | "
+        f"channels_completed={int(api.get('channels_completed', 0))} | "
+        f"channels_failed={int(api.get('channels_failed', 0))} | "
+        f"messages_scanned={int(api.get('messages_scanned', 0))} | "
+        f"history_iterators_started={int(api.get('history_iterators_started', 0))} | "
+        f"network_retries={int(api.get('network_retry_count', 0))} | "
+        f"flood_wait={bool(api.get('flood_wait', False))} | "
+        f"flood_wait_seconds={int(api.get('flood_wait_seconds', 0))} | "
+        f"safety_halt={bool(api.get('safety_halt', False))} | "
+        f"halt_reason={halt_reason} | "
+        f"elapsed_seconds={float(api.get('elapsed_seconds', 0.0)):.3f}"
+    )
+
+
+def channel_has_recent_known_message(
+    conn,
+    channel_id,
+    max_message_id,
+    cutoff_dt,
+):
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM messages
+        WHERE channel_id = ?
+          AND message_id <= ?
+          AND date_utc >= ?
+        LIMIT 1
+        """,
+        (
+            int(channel_id),
+            int(max_message_id),
+            iso_utc(cutoff_dt),
+        ),
+    ).fetchone()
+    return row is not None
+
+
 def init_sync_stats():
     return {
         "successful_channels": 0,
@@ -3320,6 +3424,7 @@ async def sync_channel_once(
     channel,
     hours,
     settings,
+    safety_telemetry=None,
 ):
     state = get_channel_state(
         conn,
@@ -3361,6 +3466,7 @@ async def sync_channel_once(
         first_sync_complete = False
 
         if first_sync:
+            note_history_iterator_started(safety_telemetry)
             async for msg in client.iter_messages(
                 channel["entity"],
                 wait_time=history_request_wait_seconds(settings),
@@ -3402,6 +3508,7 @@ async def sync_channel_once(
         # Все последующие запуски:
         # Telegram отдаёт только сообщения с ID выше последнего сохранённого.
         else:
+            note_history_iterator_started(safety_telemetry)
             async for msg in client.iter_messages(
                 channel["entity"],
                 min_id=last_message_id,
@@ -3431,28 +3538,61 @@ async def sync_channel_once(
                     result,
                 )
 
-        # Небольшое окно последних постов обновляем повторно.
-        # Это нужно, чтобы поймать edit_date, просмотры,
-        # реакции и число комментариев без повторного чтения всей истории.
+        # Небольшое окно последних уже известных постов обновляем повторно
+        # ради edit_date, просмотров, реакций и числа комментариев.
+        #
+        # На последующих запусках refresh можно безопасно пропустить,
+        # если до начала sync в локальной базе не было известных сообщений
+        # внутри refresh-окна: новые сообщения уже получены incremental-проходом.
+        # Первый sync и каналы с недавними известными сообщениями сохраняют
+        # отдельный refresh. Перед Stable это надёжнее сложной cursor-схемы и
+        # сохраняет шанс поймать правки/метрики, изменившиеся во время backfill.
         refresh_limit = int(
             settings.get(
                 "refresh_recent_messages",
-                80,
+                50,
+            )
+        )
+        refresh_hours = float(
+            settings.get(
+                "refresh_recent_hours",
+                2,
+            )
+        )
+        refresh_cutoff = utc_now() - timedelta(
+            hours=refresh_hours
+        )
+        refresh_needed = (
+            refresh_limit > 0
+            and (
+                first_sync
+                or refresh_hours <= 0
+                or channel_has_recent_known_message(
+                    conn,
+                    channel["id"],
+                    last_message_id,
+                    refresh_cutoff,
+                )
             )
         )
 
-        refresh_cutoff = utc_now() - timedelta(hours=float(settings.get('refresh_recent_hours', 2)))
-        if refresh_limit > 0:
+        if refresh_needed:
+            note_history_iterator_started(safety_telemetry)
             async for msg in client.iter_messages(
                 channel["entity"],
                 limit=refresh_limit,
                 wait_time=history_request_wait_seconds(settings),
             ):
-                refresh_hours = float(settings.get('refresh_recent_hours', 2))
-                if refresh_hours > 0 and getattr(msg, 'date', None) and msg.date < refresh_cutoff:
+                if (
+                    refresh_hours > 0
+                    and getattr(msg, "date", None)
+                    and msg.date < refresh_cutoff
+                ):
                     break
-                # Do not advance the incremental cursor here: a publication
-                # arriving during refresh must not hide other concurrent posts.
+
+                # Не двигаем incremental cursor этим проходом. Если публикация
+                # появилась уже после первого прохода, она останется выше
+                # max_seen_id и будет гарантированно получена следующим sync.
                 if int(msg.id) > max_seen_id:
                     continue
 
@@ -3535,6 +3675,7 @@ async def sync_channel_with_retries(
     channel,
     hours,
     settings,
+    safety_telemetry=None,
 ):
     attempts = max(
         1,
@@ -3574,6 +3715,7 @@ async def sync_channel_with_retries(
                 channel,
                 hours,
                 settings,
+                safety_telemetry=safety_telemetry,
             )
             return result
 
@@ -3583,6 +3725,8 @@ async def sync_channel_with_retries(
             )
             halt_sync = True
             halt_reason = "flood_wait"
+            note_flood_wait(safety_telemetry, e.seconds)
+            note_safety_halt(safety_telemetry, halt_reason)
 
             log_error(
                 f"{channel['name']}: {last_error}; "
@@ -3603,6 +3747,7 @@ async def sync_channel_with_retries(
             if telegram_error_requires_safety_stop(e):
                 halt_sync = True
                 halt_reason = "account_or_api_restriction"
+                note_safety_halt(safety_telemetry, halt_reason)
                 log_error(
                     f"{channel['name']} | SAFETY STOP | "
                     f"{last_error}"
@@ -3621,6 +3766,7 @@ async def sync_channel_with_retries(
             )
 
             if attempt < attempts:
+                note_network_retry(safety_telemetry)
                 delay = base_delay * attempt
                 print(
                     f"    Временная ошибка; "
@@ -3676,13 +3822,16 @@ async def sync_all_channels(
     )
     history_wait = history_request_wait_seconds(settings)
 
-    overall["api_safety"] = {
+    overall["api_safety"] = new_api_safety_telemetry(
+        total_channels
+    )
+    overall["api_safety"].update({
         "history_request_wait_seconds": history_wait,
         "inter_channel_delay_seconds": channel_delay,
+        # Совместимость с уже существующими потребителями внутренних stats.
         "halted_by_flood_wait": False,
         "halted_by_api_safety": False,
-        "halt_reason": None,
-    }
+    })
 
     log_info(
         "SYNC_START | "
@@ -3710,6 +3859,7 @@ async def sync_all_channels(
             channel,
             hours,
             settings,
+            safety_telemetry=overall["api_safety"],
         )
 
         overall["channel_results"].append(
@@ -3786,6 +3936,7 @@ async def sync_all_channels(
                 "halted_by_api_safety"
             ] = True
             overall["api_safety"]["halt_reason"] = reason
+            note_safety_halt(overall["api_safety"], reason)
             if reason == "flood_wait":
                 overall["api_safety"][
                     "halted_by_flood_wait"
@@ -3804,6 +3955,16 @@ async def sync_all_channels(
         time.monotonic() - started_at,
         3,
     )
+    overall["api_safety"].update({
+        "channels_completed": overall["successful_channels"],
+        "channels_failed": overall["failed_channels"],
+        "messages_scanned": overall["telegram_messages_scanned"],
+        "elapsed_seconds": overall["duration_seconds"],
+    })
+    overall["api_safety_summary"] = api_safety_summary_line(
+        overall
+    )
+    log_info(overall["api_safety_summary"])
     log_info(
         "SYNC_END | "
         f"channels_done={len(overall['channel_results'])}/"

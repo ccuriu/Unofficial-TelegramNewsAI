@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -28,6 +29,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         collector.APP_DIR = self.directory
         collector.DB_FILE = self.directory / "news.db"
+        collector.SETTINGS_FILE = self.directory / "settings_free.json"
         collector.OUTPUT_DIR = self.directory / "Дайджесты"
         collector.ARCHIVE_DIR = collector.OUTPUT_DIR / "Архив"
         collector.RAW_DIR = collector.ARCHIVE_DIR / "Сырые"
@@ -106,7 +108,7 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         self.assertEqual(
             collector.inter_channel_delay_seconds(self.settings, 50),
-            0.25,
+            1.0,
         )
         self.assertEqual(collector.MAX_SELECTED_CHANNELS, 50)
         self.assertNotIn("bulk_channel_threshold", collector.DEFAULT_SETTINGS)
@@ -125,6 +127,42 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertTrue(
             collector.DEFAULT_SETTINGS["stop_on_any_flood_wait"]
         )
+
+    def test_load_settings_migrates_exact_old_standard_pacing_only(self):
+        old = dict(collector.DEFAULT_SETTINGS)
+        old.update({
+            "history_request_wait_seconds": 0.5,
+            "inter_channel_delay_seconds": 0.25,
+            "telethon_flood_sleep_threshold_seconds": 0,
+            "max_flood_wait_seconds": 0,
+            "stop_on_any_flood_wait": True,
+            "refresh_recent_messages": 50,
+            "refresh_recent_hours": 2,
+        })
+        collector.SETTINGS_FILE.write_text(
+            json.dumps(old),
+            encoding="utf-8",
+        )
+
+        loaded = collector.load_settings()
+
+        self.assertEqual(loaded["inter_channel_delay_seconds"], 1.0)
+        persisted = json.loads(
+            collector.SETTINGS_FILE.read_text(encoding="utf-8")
+        )
+        self.assertEqual(persisted["inter_channel_delay_seconds"], 1.0)
+
+    def test_load_settings_preserves_manual_inter_channel_delay(self):
+        custom = dict(collector.DEFAULT_SETTINGS)
+        custom["inter_channel_delay_seconds"] = 0.6
+        collector.SETTINGS_FILE.write_text(
+            json.dumps(custom),
+            encoding="utf-8",
+        )
+
+        loaded = collector.load_settings()
+
+        self.assertEqual(loaded["inter_channel_delay_seconds"], 0.6)
 
     def test_sync_all_channels_rejects_more_than_product_limit_before_network(self):
         channels = [
@@ -189,12 +227,213 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertGreaterEqual(len(client.calls), 2)
+        # Первый sync сохраняет отдельный refresh ради правок/метрик,
+        # которые могли измениться во время первоначального backfill.
+        self.assertEqual(len(client.calls), 2)
         expected = collector.history_request_wait_seconds(
             self.settings
         )
         for _, kwargs in client.calls:
             self.assertEqual(kwargs.get("wait_time"), expected)
+
+    def test_incremental_sync_skips_refresh_without_recent_known_message(self):
+        old_date = self.now - timedelta(hours=3)
+        old_item = collector.make_message(
+            self.channel,
+            SimpleNamespace(
+                id=10,
+                message="Старое сообщение",
+                date=old_date,
+                views=1,
+            ),
+            self.settings,
+        )
+        collector.upsert_message(self.connection, old_item)
+        collector.upsert_channel_state(
+            self.connection,
+            self.channel,
+            last_message_id=10,
+            success=True,
+        )
+        self.connection.commit()
+
+        class ListAsyncIterator:
+            def __init__(self, items):
+                self.items = iter(items)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self.items)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def iter_messages(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return ListAsyncIterator([
+                    SimpleNamespace(
+                        id=11,
+                        message="Новое сообщение",
+                        date=self_now,
+                        views=2,
+                    )
+                ])
+
+        self_now = self.now
+        client = FakeClient()
+        telemetry = collector.new_api_safety_telemetry(1)
+
+        result = asyncio.run(
+            collector.sync_channel_once(
+                client,
+                self.connection,
+                self.channel,
+                24,
+                self.settings,
+                safety_telemetry=telemetry,
+            )
+        )
+
+        self.assertEqual(result["new"], 1)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(telemetry["history_iterators_started"], 1)
+        state = collector.get_channel_state(self.connection, 1)
+        self.assertEqual(state["last_message_id"], 11)
+
+    def test_refresh_keeps_edits_metrics_and_does_not_hide_late_message(self):
+        original = collector.make_message(
+            self.channel,
+            SimpleNamespace(
+                id=10,
+                message="Исходный текст",
+                date=self.now - timedelta(minutes=30),
+                views=10,
+            ),
+            self.settings,
+        )
+        collector.upsert_message(self.connection, original)
+        collector.upsert_channel_state(
+            self.connection,
+            self.channel,
+            last_message_id=10,
+            success=True,
+        )
+        self.connection.commit()
+
+        new_message = SimpleNamespace(
+            id=11,
+            message="Новое сообщение",
+            date=self.now,
+            views=1,
+        )
+        late_message = SimpleNamespace(
+            id=12,
+            message="Появилось во время refresh",
+            date=self.now,
+            views=1,
+        )
+        refreshed_new = SimpleNamespace(
+            id=11,
+            message="Новое сообщение",
+            date=self.now,
+            views=2,
+        )
+        edited_old = SimpleNamespace(
+            id=10,
+            message="Исправленный текст",
+            date=self.now - timedelta(minutes=30),
+            views=25,
+        )
+
+        class ListAsyncIterator:
+            def __init__(self, items):
+                self.items = iter(items)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self.items)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+                self.batches = [
+                    [new_message],
+                    [late_message, refreshed_new, edited_old],
+                ]
+
+            def iter_messages(self, *args, **kwargs):
+                index = len(self.calls)
+                self.calls.append((args, kwargs))
+                return ListAsyncIterator(self.batches[index])
+
+        client = FakeClient()
+        telemetry = collector.new_api_safety_telemetry(1)
+        result = asyncio.run(
+            collector.sync_channel_once(
+                client,
+                self.connection,
+                self.channel,
+                24,
+                self.settings,
+                safety_telemetry=telemetry,
+            )
+        )
+
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(telemetry["history_iterators_started"], 2)
+        self.assertGreaterEqual(result["content_changed"], 1)
+        self.assertGreaterEqual(result["metrics_changed"], 1)
+        state = collector.get_channel_state(self.connection, 1)
+        self.assertEqual(state["last_message_id"], 11)
+        late = self.connection.execute(
+            "SELECT 1 FROM messages WHERE channel_id = 1 AND message_id = 12"
+        ).fetchone()
+        self.assertIsNone(late)
+
+    def test_transient_retry_is_counted_but_safety_errors_are_not_retried(self):
+        client = SimpleNamespace(
+            is_connected=Mock(return_value=True),
+            connect=AsyncMock(),
+        )
+        telemetry = collector.new_api_safety_telemetry(1)
+        ok = collector.init_channel_sync_stats(self.channel, False)
+
+        with patch.object(
+            collector,
+            "sync_channel_once",
+            AsyncMock(side_effect=[RuntimeError("temporary"), ok]),
+        ) as mocked_sync:
+            with patch.object(
+                collector.asyncio,
+                "sleep",
+                AsyncMock(),
+            ) as mocked_sleep:
+                result = asyncio.run(
+                    collector.sync_channel_with_retries(
+                        client,
+                        self.connection,
+                        self.channel,
+                        24,
+                        self.settings,
+                        safety_telemetry=telemetry,
+                    )
+                )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mocked_sync.await_count, 2)
+        mocked_sleep.assert_awaited_once()
+        self.assertEqual(telemetry["network_retry_count"], 1)
 
     def test_sync_channel_with_retries_does_not_retry_flood_wait(self):
         class SyntheticFloodWaitError(Exception):
@@ -253,6 +492,7 @@ class OfflineRegressionTests(unittest.TestCase):
         for label, error in (
             ("peer_flood", RuntimeError("PEER_FLOOD")),
             ("session_revoked", SessionRevokedError("revoked")),
+            ("frozen_account", RuntimeError("FROZEN_METHOD_INVALID")),
         ):
             with self.subTest(signal=label):
                 with patch.object(
@@ -408,6 +648,91 @@ class OfflineRegressionTests(unittest.TestCase):
             result["api_safety"]["halt_reason"],
             "flood_wait",
         )
+
+    def test_api_safety_summary_is_logged_and_contains_no_secrets(self):
+        ok = collector.init_channel_sync_stats(self.channel, False)
+        ok["scanned"] = 3
+
+        with patch.object(
+            collector,
+            "sync_channel_with_retries",
+            AsyncMock(return_value=ok),
+        ):
+            with patch.object(
+                collector,
+                "log_info",
+            ) as mocked_log:
+                result = asyncio.run(
+                    collector.sync_all_channels(
+                        object(),
+                        self.connection,
+                        [self.channel],
+                        24,
+                        self.settings,
+                    )
+                )
+
+        summary = result["api_safety_summary"]
+        self.assertTrue(summary.startswith("API_SAFETY_SUMMARY | "))
+        self.assertIn("channel_count=1", summary)
+        self.assertIn("channels_completed=1", summary)
+        self.assertIn("messages_scanned=3", summary)
+        self.assertIn("history_iterators_started=0", summary)
+        self.assertIn("network_retries=0", summary)
+        lowered = summary.casefold()
+        for secret_name in (
+            "api_hash",
+            "auth_key",
+            "phone_code",
+            "session_contents",
+        ):
+            self.assertNotIn(secret_name, lowered)
+        self.assertTrue(
+            any(
+                call.args
+                and str(call.args[0]).startswith("API_SAFETY_SUMMARY | ")
+                for call in mocked_log.call_args_list
+            )
+        )
+
+    def test_flood_wait_seconds_are_recorded_in_safety_telemetry(self):
+        class SyntheticFloodWaitError(Exception):
+            def __init__(self, seconds):
+                super().__init__(f"FloodWait {seconds}")
+                self.seconds = seconds
+
+        client = SimpleNamespace(
+            is_connected=Mock(return_value=True),
+            connect=AsyncMock(),
+        )
+        telemetry = collector.new_api_safety_telemetry(1)
+
+        with patch.object(
+            collector,
+            "FloodWaitError",
+            SyntheticFloodWaitError,
+        ):
+            with patch.object(
+                collector,
+                "sync_channel_once",
+                AsyncMock(side_effect=SyntheticFloodWaitError(77)),
+            ):
+                result = asyncio.run(
+                    collector.sync_channel_with_retries(
+                        client,
+                        self.connection,
+                        self.channel,
+                        24,
+                        self.settings,
+                        safety_telemetry=telemetry,
+                    )
+                )
+
+        self.assertTrue(result["halt_sync"])
+        self.assertTrue(telemetry["flood_wait"])
+        self.assertEqual(telemetry["flood_wait_seconds"], 77)
+        self.assertTrue(telemetry["safety_halt"])
+        self.assertEqual(telemetry["halt_reason"], "flood_wait")
 
     def test_history_backfill_is_skipped_after_sync_flood_stop(self):
         halted_sync = {
@@ -3203,7 +3528,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn(
-            "реальные испытания Telegram API продолжаются параллельно",
+            "сетевой профиль ещё проверяется в реальной работе",
             readme,
         )
         self.assertIn(
