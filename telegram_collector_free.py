@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.6"
+DIGEST_PROFILE_VERSION = "8.7"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -4883,6 +4883,79 @@ def _continuity_event_anchor_pairs(message):
     return pairs
 
 
+def _continuity_attribution_anchor_tokens(message):
+    """
+    Return lexical-anchor noise from an explicit multiword source attribution.
+
+    A construction such as "пишет Financial Times со ссылкой ..." may be
+    useful provenance, but the publisher name and the surrounding attribution
+    boilerplate are not an event identity.  Keep normal message tokens intact;
+    this helper is used only by the pure lexical event-anchor gate.
+    """
+    text = re.sub(
+        r"https?://\\S+",
+        " ",
+        str(message.get("text") or ""),
+        flags=re.IGNORECASE,
+    )
+    first_paragraph = re.split(
+        r"\\n\\s*\\n",
+        text,
+        maxsplit=1,
+    )[0]
+
+    result = set()
+    for match in re.finditer(
+        r"\\b(?:сообща\\w*|пиш\\w*|переда\\w*)\\s+"
+        r"(?P<source>[^\\n,.;:()]{1,80}?)\\s+"
+        r"(?:со|с|з)\\s+ссылк\\w*",
+        first_paragraph,
+        flags=re.IGNORECASE | re.UNICODE,
+    ):
+        source_tokens = []
+        for token in re.findall(
+            r"[^\\W_]+(?:['’-][^\\W_]+)*",
+            unicodedata.normalize(
+                "NFKC",
+                match.group("source"),
+            ).casefold(),
+            flags=re.UNICODE,
+        ):
+            if len(token) < 5 or token.isdigit():
+                continue
+            normalized = normalize_search_token(token)
+            if normalized in SEARCH_STOPWORDS:
+                continue
+            token_stem = search_stem_prefix(normalized)
+            if len(token_stem) >= 5:
+                source_tokens.append(token_stem)
+
+        # A single source word (for example Reuters) is too broad a reason to
+        # alter lexical grouping.  The RUN 3 failures came from multiword
+        # publisher/source names acting as rare anchor pairs.
+        if len(set(source_tokens)) < 2:
+            continue
+
+        for token in re.findall(
+            r"[^\\W_]+(?:['’-][^\\W_]+)*",
+            unicodedata.normalize(
+                "NFKC",
+                match.group(0),
+            ).casefold(),
+            flags=re.UNICODE,
+        ):
+            if len(token) < 5 or token.isdigit():
+                continue
+            normalized = normalize_search_token(token)
+            if normalized in SEARCH_STOPWORDS:
+                continue
+            token_stem = search_stem_prefix(normalized)
+            if len(token_stem) >= 5:
+                result.add(token_stem)
+
+    return result
+
+
 def _continuity_recurring_summary_day(message):
     """
     Возвращает календарный день только для явно периодической сводки в lead.
@@ -6077,6 +6150,73 @@ def _event_candidate_reply_counterparty_diverges(message, target_message):
     return left[0] == right[0] and left[1] != right[1]
 
 
+def _event_candidate_lexical_meeting_pair(message):
+    """
+    Return one unordered explicit meeting pair for the pure lexical gate.
+
+    This deliberately does not change the accepted reply guard above.  It
+    extends only lexical matching to noun-led forms such as "Встреча A с B"
+    and "Зустріч A і B", which are common headline constructions.
+    """
+    participants = _event_candidate_meeting_participants(message)
+    if participants:
+        return tuple(sorted(participants))
+
+    text = unicodedata.normalize(
+        "NFKC",
+        str(message.get("text") or ""),
+    )[:320]
+    if not text:
+        return None
+
+    match = re.search(
+        r"\\b(?:встреч\\w*|зустріч\\w*|переговор\\w*|перемов\\w*)\\s+"
+        r"(?P<actor>[^\\n.!?]{1,90}?)\\s+"
+        r"(?:с|со|з|зі|із)\\s+(?P<after>[^\\n.!?]{1,100})",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        actor = _event_candidate_named_token(match.group("actor"))
+        counterpart_fragment = re.split(
+            r"\\s+(?:в|у|на|під|под|біля|около|at|in|on|during)\\s+",
+            match.group("after"),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        counterpart = _event_candidate_named_token(counterpart_fragment)
+        if actor and counterpart and actor != counterpart:
+            return tuple(sorted((actor, counterpart)))
+
+    match = re.search(
+        r"\\b(?:встреч\\w*|зустріч\\w*)\\s+"
+        r"(?P<subjects>[^\\n.!?]{1,140}?)\\s+"
+        r"\\b(?:буд\\w*|відбуд\\w*|состо\\w*|заплан\\w*|"
+        r"ожида\\w*|очіку\\w*|возмож\\w*|можлив\\w*)\\b",
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if match:
+        parts = re.split(
+            r"\\s+(?:и|та|and|&)\\s+",
+            match.group("subjects"),
+            flags=re.IGNORECASE,
+        )
+        if len(parts) >= 2:
+            actor = _event_candidate_named_token(parts[-2])
+            counterpart = _event_candidate_named_token(parts[-1])
+            if actor and counterpart and actor != counterpart:
+                return tuple(sorted((actor, counterpart)))
+
+    return None
+
+
+def _event_candidate_lexical_meeting_pair_diverges(message, target_message):
+    left = _event_candidate_lexical_meeting_pair(message)
+    right = _event_candidate_lexical_meeting_pair(target_message)
+    return bool(left and right and left != right)
+
+
 def build_event_candidates(current_messages):
     """
     Deterministic CURRENT -> CURRENT coverage layer for the AI-facing export.
@@ -6256,6 +6396,7 @@ def build_event_candidates(current_messages):
 
     tokens_by_key = {}
     anchors_by_key = {}
+    attribution_anchor_tokens_by_key = {}
     token_document_frequency = Counter()
     anchor_pair_document_frequency = Counter()
     for key, message in by_key.items():
@@ -6263,6 +6404,9 @@ def build_event_candidates(current_messages):
         anchors = _continuity_event_anchor_pairs(message)
         tokens_by_key[key] = tokens
         anchors_by_key[key] = anchors
+        attribution_anchor_tokens_by_key[key] = (
+            _continuity_attribution_anchor_tokens(message)
+        )
         token_document_frequency.update(tokens)
         anchor_pair_document_frequency.update(anchors)
 
@@ -6326,12 +6470,27 @@ def build_event_candidates(current_messages):
         ):
             return None
 
+        if _event_candidate_lexical_meeting_pair_diverges(left, right):
+            return None
+
         shared_anchor_pairs = (
             anchors_by_key.get(left_key, set())
             & anchors_by_key.get(right_key, set())
         )
+        left_attribution_tokens = attribution_anchor_tokens_by_key.get(
+            left_key,
+            set(),
+        )
+        right_attribution_tokens = attribution_anchor_tokens_by_key.get(
+            right_key,
+            set(),
+        )
         has_event_anchor = any(
-            anchor_pair_document_frequency.get(pair, 0)
+            pair[0] not in left_attribution_tokens
+            and pair[1] not in left_attribution_tokens
+            and pair[0] not in right_attribution_tokens
+            and pair[1] not in right_attribution_tokens
+            and anchor_pair_document_frequency.get(pair, 0)
             <= anchor_pair_limit
             and min(
                 token_document_frequency.get(pair[0], document_count),
