@@ -1578,26 +1578,51 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_topic_search_builds_related_groups_without_fake_change_status(self):
         shared_url = "https://example.test/story/42"
-        for message_id in (1, 2):
-            self.add_message(
-                message_id,
-                "Проверочная тема с общим первичным источником",
+        text = "Проверочная тема с общим первичным источником"
+
+        self.add_message(1, text)
+        self.connection.execute(
+            """
+            UPDATE messages
+            SET canonical_urls_json = ?, origin_key = ?
+            WHERE channel_id = 1 AND message_id = 1
+            """,
+            (
+                __import__("json").dumps([shared_url]),
+                "url:" + shared_url,
+            ),
+        )
+        self.connection.execute(
+            "INSERT INTO channels(channel_id, name, username) VALUES(2, 'Другой канал', 'other')"
+        )
+        self.connection.execute(
+            """
+            INSERT INTO messages(
+                channel_id, message_id, text, date_utc, channel_name, username,
+                canonical_urls_json, origin_key
             )
-            self.connection.execute(
-                """
-                UPDATE messages
-                SET canonical_urls_json = ?, origin_key = ?
-                WHERE channel_id = 1 AND message_id = ?
-                """,
-                (
-                    __import__("json").dumps([shared_url]),
-                    "url:" + shared_url,
-                    message_id,
-                ),
-            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2,
+                2,
+                text,
+                collector.iso_utc(self.now - timedelta(minutes=1)),
+                "Другой канал",
+                "other",
+                __import__("json").dumps([shared_url]),
+                "url:" + shared_url,
+            ),
+        )
         self.connection.commit()
 
-        result = self.search("проверочная тема")
+        result = collector.search_database(
+            self.connection,
+            "проверочная тема",
+            1,
+            self.settings,
+            [1, 2],
+        )
         self.assertEqual(len(result["direct_results"]), 2)
         self.assertEqual(len(result["related_message_groups"]), 1)
         for message in result["direct_results"]:
@@ -2962,7 +2987,7 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
     def test_continuity_context_is_bounded_per_current_message(self):
-        source_url = "https://example.com/source/story"
+        source_url = "https://example.com/source/story-2026"
         current = {
             "channel_id": 1,
             "channel": "Канал A",
@@ -3318,9 +3343,9 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("channel_url", request)
         self.assertIn("Markdown-ссылкой", request)
         self.assertIn("копируй ДОСЛОВНО", request)
-        self.assertIn("Запрещено придумывать URL", request)
-        self.assertIn("Google/другим redirect", request)
-        self.assertIn("«исправлять» URL по памяти", request)
+        self.assertIn("URL не придумывай", request)
+        self.assertIn("Google или redirect-ссылкой", request)
+        self.assertIn("не «исправляй» по памяти", request)
         self.assertIn("исходную literal URL", request)
         self.assertIn("Каждый самостоятельный фактический сюжет должен завершаться строкой источника", request)
         self.assertIn("2–3 ключевые ссылки", request)
@@ -3696,7 +3721,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn(
-            "структурированный JSON → выбранный пользователем ИИ → дайджест событий",
+            "полный JSON + плоский Markdown для ИИ → выбранный пользователем ИИ → дайджест событий",
             readme,
         )
         self.assertIn(
