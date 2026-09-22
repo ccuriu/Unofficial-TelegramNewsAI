@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.4"
+DIGEST_PROFILE_VERSION = "8.5"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -5844,9 +5844,13 @@ def _ai_message_block(message, label="MESSAGE", related_current_refs=None):
     if username:
         lines.append(f"USERNAME: @{username}")
 
-    telegram_url = message.get("telegram_url")
-    if telegram_url:
-        lines.append(f"SOURCE_URL: {telegram_url}")
+    source_url = (
+        message.get("telegram_url")
+        or message.get("channel_url")
+        or public_channel_link(message.get("username"))
+    )
+    if source_url:
+        lines.append(f"SOURCE_URL: {source_url}")
 
     related_group_id = message.get("related_group_id")
     if related_group_id:
@@ -5915,13 +5919,659 @@ def _is_textless_media_only_for_ai(message):
     )
 
 
+
+CANDIDATE_GUIDANCE = (
+    "Каждый CANDIDATE — кандидат на самостоятельный сюжет, а не утверждение, что все его сообщения точно описывают одно событие. "
+    "Разрешается объединять несколько CANDIDATE, если EVIDENCE показывает один эпизод, но содержательно значимый singleton нельзя молча терять. "
+    "MEMBER_REFS и SUPPORTING_REFS обеспечивают покрытие; факты и степень уверенности бери из EVIDENCE."
+)
+
+
+def _event_candidate_sort_key(message):
+    return (
+        message.get("date_local")
+        or message.get("date_utc")
+        or "",
+        int(message.get("channel_id") or 0),
+        int(message.get("message_id") or 0),
+    )
+
+
+def _event_candidate_channel_identity(message):
+    channel_id = int(message.get("channel_id") or 0)
+    if channel_id:
+        return ("id", channel_id)
+    username = str(message.get("username") or "").lstrip("@").casefold()
+    if username:
+        return ("username", username)
+    return ("channel", str(message.get("channel") or "").casefold())
+
+
+def _event_candidate_ref(message, retained_as=None):
+    result = {
+        "message_key": message.get("message_key") or message_key(message),
+        "channel": message.get("channel"),
+        "date_local": message.get("date_local") or message.get("date_utc"),
+        "source_url": (
+            message.get("telegram_url")
+            or message.get("channel_url")
+            or public_channel_link(message.get("username"))
+        ),
+    }
+    if retained_as:
+        result["retained_as"] = retained_as
+    return result
+
+
+def build_event_candidates(current_messages):
+    """
+    Deterministic CURRENT -> CURRENT coverage layer for the AI-facing export.
+
+    Strong relations are closed transitively first. Pure lexical joining is then
+    processed newest-first and may attach only to the fixed newest anchor of an
+    already-created candidate. A peripheral lexical member therefore cannot
+    bridge A-B and B-C into an automatic A-B-C merge.
+    """
+    messages = [
+        message
+        for message in current_messages
+        if isinstance(message, dict)
+    ]
+    by_key = {}
+    for message in messages:
+        key = message.get("message_key") or message_key(message)
+        if key in by_key:
+            raise ValueError(
+                "event candidate coverage invariant failed: duplicate input "
+                f"message_key {key}"
+            )
+        by_key[key] = message
+
+    if not messages:
+        return {
+            "candidates": [],
+            "coverage": {
+                "input_current_messages": 0,
+                "event_candidates": 0,
+                "singleton_candidates": 0,
+                "full_evidence_messages": 0,
+                "near_duplicate_supporting_refs": 0,
+                "unassigned_messages": 0,
+                "duplicate_assignments": 0,
+            },
+            "stats": {
+                "strong_groups": 0,
+                "lexical_assisted_candidates": 0,
+                "max_candidate_size": 0,
+                "average_candidate_size": 0.0,
+                "median_candidate_size": 0.0,
+            },
+        }
+
+    parent = {key: key for key in by_key}
+    relation_edges = []
+
+    def find(key):
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    def union(left, right, relation_type, reason):
+        if not left or not right or left == right:
+            return
+        if left not in parent or right not in parent:
+            return
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+        relation_edges.append((left, right, relation_type, reason))
+
+    def union_bucket(keys, relation_type, reason):
+        unique = list(dict.fromkeys(keys))
+        if len(unique) < 2:
+            return
+        first = unique[0]
+        for key in unique[1:]:
+            union(first, key, relation_type, reason)
+
+    related_buckets = {}
+    forward_buckets = {}
+    url_buckets = {}
+    direct_index = {}
+
+    for message in messages:
+        key = message.get("message_key") or message_key(message)
+        related_group_id = message.get("related_group_id")
+        if related_group_id:
+            related_buckets.setdefault(str(related_group_id), []).append(key)
+
+        origin = _continuity_specific_origin(message)
+        if isinstance(origin, str):
+            if origin.startswith("telegram_forward:"):
+                forward_buckets.setdefault(origin, []).append(key)
+            elif origin.startswith("url:"):
+                url = origin[4:]
+                if is_specific_shared_source_url(url):
+                    url_buckets.setdefault(url, []).append(key)
+
+        for url in _continuity_specific_urls(message):
+            url_buckets.setdefault(url, []).append(key)
+
+        channel_id = int(message.get("channel_id") or 0)
+        message_id = int(message.get("message_id") or 0)
+        if channel_id and message_id:
+            direct_index[(channel_id, message_id)] = key
+
+    for keys in related_buckets.values():
+        union_bucket(keys, "strong_source", "related_message_group")
+
+    for keys in forward_buckets.values():
+        union_bucket(keys, "strong_source", "telegram_forward_origin")
+
+    # Keep the corrected source rule used by related_message_groups:
+    # one concrete external material may join different channels, but a URL
+    # repeated inside one channel is treated as potentially recurring/promo.
+    for url, keys in url_buckets.items():
+        unique = list(dict.fromkeys(keys))
+        if len(unique) < 2:
+            continue
+        identities = []
+        repeated_channel = False
+        seen = set()
+        for key in unique:
+            identity = _event_candidate_channel_identity(by_key[key])
+            if identity in seen:
+                repeated_channel = True
+                break
+            seen.add(identity)
+            identities.append(key)
+        if repeated_channel or len(seen) < 2:
+            continue
+        union_bucket(
+            identities,
+            "strong_source",
+            "same_specific_external_source",
+        )
+
+    for message in messages:
+        key = message.get("message_key") or message_key(message)
+        reply_to = message.get("reply_to_message_id")
+        if reply_to is not None:
+            target = direct_index.get((
+                int(message.get("channel_id") or 0),
+                int(reply_to),
+            ))
+            union(
+                key,
+                target,
+                "strong_source",
+                "reply_to_current_message",
+            )
+
+        for ref in message.get("similar_message_refs", []) or []:
+            if isinstance(ref, str) and ref in by_key:
+                union(
+                    key,
+                    ref,
+                    "near_duplicate",
+                    "similar_message_ref",
+                )
+
+    component_members = {}
+    for key in by_key:
+        component_members.setdefault(find(key), []).append(key)
+
+    component_relations = {
+        root: {"types": set(), "reasons": set()}
+        for root in component_members
+    }
+    for left, right, relation_type, reason in relation_edges:
+        root = find(left)
+        if root == find(right):
+            component_relations[root]["types"].add(relation_type)
+            component_relations[root]["reasons"].add(reason)
+
+    tokens_by_key = {}
+    anchors_by_key = {}
+    token_document_frequency = Counter()
+    anchor_pair_document_frequency = Counter()
+    for key, message in by_key.items():
+        tokens = _continuity_message_tokens(message)
+        anchors = _continuity_event_anchor_pairs(message)
+        tokens_by_key[key] = tokens
+        anchors_by_key[key] = anchors
+        token_document_frequency.update(tokens)
+        anchor_pair_document_frequency.update(anchors)
+
+    document_count = max(1, len(messages))
+    rare_limit = max(3, int(math.ceil(document_count * 0.03)))
+    common_limit = max(8, int(math.ceil(document_count * 0.12)))
+    anchor_pair_limit = max(2, int(math.ceil(document_count * 0.01)))
+    anchor_token_limit = max(3, int(math.ceil(document_count * 0.015)))
+
+    def lexical_score(left_key, right_key):
+        left = by_key[left_key]
+        right = by_key[right_key]
+        left_tokens = {
+            token
+            for token in tokens_by_key.get(left_key, set())
+            if token_document_frequency.get(token, 0) <= common_limit
+        }
+        right_tokens = {
+            token
+            for token in tokens_by_key.get(right_key, set())
+            if token_document_frequency.get(token, 0) <= common_limit
+        }
+        shared = left_tokens & right_tokens
+        same_channel = _continuity_same_channel(left, right)
+
+        if same_channel:
+            if len(shared) < 3:
+                return None
+            rare_shared = sum(
+                1
+                for token in shared
+                if token_document_frequency.get(token, 0) <= rare_limit
+            )
+            if rare_shared < 2:
+                return None
+        else:
+            if len(shared) < 4:
+                return None
+            rare_shared = sum(
+                1
+                for token in shared
+                if token_document_frequency.get(token, 0) <= rare_limit
+            )
+            if rare_shared < 3:
+                return None
+
+        overlap = len(shared) / max(
+            1,
+            min(len(left_tokens), len(right_tokens)),
+        )
+        if overlap < 0.20:
+            return None
+
+        left_summary_day = _continuity_recurring_summary_day(left)
+        right_summary_day = _continuity_recurring_summary_day(right)
+        if (
+            same_channel
+            and left_summary_day is not None
+            and right_summary_day is not None
+            and left_summary_day != right_summary_day
+        ):
+            return None
+
+        shared_anchor_pairs = (
+            anchors_by_key.get(left_key, set())
+            & anchors_by_key.get(right_key, set())
+        )
+        has_event_anchor = any(
+            anchor_pair_document_frequency.get(pair, 0)
+            <= anchor_pair_limit
+            and min(
+                token_document_frequency.get(pair[0], document_count),
+                token_document_frequency.get(pair[1], document_count),
+            )
+            <= anchor_token_limit
+            for pair in shared_anchor_pairs
+        )
+        if not has_event_anchor:
+            return None
+
+        idf_score = sum(
+            math.log(
+                (document_count + 1)
+                / (token_document_frequency.get(token, 0) + 1)
+            ) + 1.0
+            for token in shared
+        )
+        score = idf_score + len(shared) * 0.5 + overlap * 4.0
+        if score < 5.0:
+            return None
+        return score
+
+    strong_components = []
+    for root, keys in component_members.items():
+        ordered = sorted(
+            keys,
+            key=lambda key: _event_candidate_sort_key(by_key[key]),
+            reverse=True,
+        )
+        strong_components.append({
+            "member_keys": ordered,
+            "anchor_key": ordered[0],
+            "relation_types": set(component_relations[root]["types"]),
+            "relation_reasons": set(component_relations[root]["reasons"]),
+        })
+
+    strong_components.sort(
+        key=lambda item: _event_candidate_sort_key(
+            by_key[item["anchor_key"]]
+        ),
+        reverse=True,
+    )
+
+    candidates = []
+    anchor_token_index = {}
+
+    def register_candidate_anchor(candidate_index, anchor_key):
+        for token in tokens_by_key.get(anchor_key, set()):
+            anchor_token_index.setdefault(token, set()).add(candidate_index)
+
+    for component in strong_components:
+        anchor_key = component["anchor_key"]
+        candidate_counts = Counter()
+        for token in tokens_by_key.get(anchor_key, set()):
+            if token_document_frequency.get(token, 0) > common_limit:
+                continue
+            for candidate_index in anchor_token_index.get(token, ()):
+                candidate_counts[candidate_index] += 1
+
+        best_index = None
+        best_score = None
+        for candidate_index, shared_count in candidate_counts.items():
+            if shared_count < 3:
+                continue
+            score = lexical_score(
+                anchor_key,
+                candidates[candidate_index]["anchor_key"],
+            )
+            if score is None:
+                continue
+            if (
+                best_score is None
+                or score > best_score
+                or (
+                    score == best_score
+                    and candidate_index < best_index
+                )
+            ):
+                best_index = candidate_index
+                best_score = score
+
+        if best_index is None:
+            candidates.append({
+                "anchor_key": anchor_key,
+                "member_keys": list(component["member_keys"]),
+                "relation_types": set(component["relation_types"]),
+                "relation_reasons": set(component["relation_reasons"]),
+            })
+            register_candidate_anchor(len(candidates) - 1, anchor_key)
+        else:
+            target = candidates[best_index]
+            target["member_keys"].extend(component["member_keys"])
+            target["relation_types"].update(component["relation_types"])
+            target["relation_types"].add("lexical_candidate")
+            target["relation_reasons"].update(component["relation_reasons"])
+            target["relation_reasons"].add("lexical_anchor_gate")
+
+    near_edges = [
+        (left, right)
+        for left, right, relation_type, _ in relation_edges
+        if relation_type == "near_duplicate"
+    ]
+
+    finalized = []
+    for candidate in candidates:
+        member_keys = list(dict.fromkeys(candidate["member_keys"]))
+        member_keys.sort(
+            key=lambda key: _event_candidate_sort_key(by_key[key]),
+            reverse=True,
+        )
+        member_set = set(member_keys)
+
+        near_parent = {key: key for key in member_keys}
+
+        def near_find(key):
+            while near_parent[key] != key:
+                near_parent[key] = near_parent[near_parent[key]]
+                key = near_parent[key]
+            return key
+
+        def near_union(left, right):
+            if left not in near_parent or right not in near_parent:
+                return
+            left_root = near_find(left)
+            right_root = near_find(right)
+            if left_root != right_root:
+                near_parent[right_root] = left_root
+
+        for left, right in near_edges:
+            if left in member_set and right in member_set:
+                near_union(left, right)
+
+        near_groups = {}
+        for key in member_keys:
+            near_groups.setdefault(near_find(key), []).append(key)
+
+        supporting_to = {}
+        for keys in near_groups.values():
+            if len(keys) < 2:
+                continue
+            retained = max(
+                keys,
+                key=lambda key: _event_candidate_sort_key(by_key[key]),
+            )
+            for key in keys:
+                if key != retained:
+                    supporting_to[key] = retained
+
+        evidence_messages = [
+            by_key[key]
+            for key in member_keys
+            if key not in supporting_to
+        ]
+        supporting_refs = [
+            _event_candidate_ref(
+                by_key[key],
+                retained_as=supporting_to[key],
+            )
+            for key in member_keys
+            if key in supporting_to
+        ]
+        member_refs = [
+            _event_candidate_ref(by_key[key])
+            for key in member_keys
+        ]
+
+        relation_types = set(candidate["relation_types"])
+        if len(member_keys) == 1:
+            relation = "singleton"
+        elif relation_types == {"near_duplicate"}:
+            relation = "near_duplicate"
+        elif relation_types == {"lexical_candidate"}:
+            relation = "lexical_candidate"
+        elif relation_types == {"strong_source"}:
+            relation = "strong_source"
+        elif len(relation_types) > 1:
+            relation = "mixed"
+        elif "lexical_candidate" in relation_types:
+            relation = "lexical_candidate"
+        else:
+            relation = "strong_source"
+
+        source_identities = {
+            _event_candidate_channel_identity(by_key[key])
+            for key in member_keys
+        }
+        dates = [
+            by_key[key].get("date_local")
+            or by_key[key].get("date_utc")
+            or ""
+            for key in member_keys
+        ]
+
+        finalized.append({
+            "candidate_id": "",
+            "latest": max(dates) if dates else "",
+            "earliest": min(dates) if dates else "",
+            "messages_count": len(member_keys),
+            "sources_count": len(source_identities),
+            "relation": relation,
+            "member_refs": member_refs,
+            "evidence_messages": evidence_messages,
+            "supporting_refs": supporting_refs,
+            "relation_types": sorted(relation_types),
+            "relation_reasons": sorted(candidate["relation_reasons"]),
+        })
+
+    finalized.sort(
+        key=lambda item: (
+            item["latest"],
+            item["member_refs"][0]["message_key"]
+            if item["member_refs"] else "",
+        ),
+        reverse=True,
+    )
+    for index, candidate in enumerate(finalized, 1):
+        candidate["candidate_id"] = f"event_{index:04d}"
+
+    assigned_counts = Counter(
+        ref["message_key"]
+        for candidate in finalized
+        for ref in candidate["member_refs"]
+    )
+    input_keys = set(by_key)
+    unassigned = input_keys - set(assigned_counts)
+    duplicate_assignments = sum(
+        count - 1
+        for count in assigned_counts.values()
+        if count > 1
+    )
+    full_evidence_count = sum(
+        len(candidate["evidence_messages"])
+        for candidate in finalized
+    )
+    supporting_count = sum(
+        len(candidate["supporting_refs"])
+        for candidate in finalized
+    )
+
+    if (
+        unassigned
+        or duplicate_assignments
+        or len(assigned_counts) != len(input_keys)
+        or full_evidence_count + supporting_count != len(input_keys)
+    ):
+        raise ValueError(
+            "event candidate coverage invariant failed: "
+            f"input={len(input_keys)} assigned={len(assigned_counts)} "
+            f"unassigned={len(unassigned)} "
+            f"duplicate_assignments={duplicate_assignments} "
+            f"evidence={full_evidence_count} support={supporting_count}"
+        )
+
+    sizes = sorted(
+        candidate["messages_count"]
+        for candidate in finalized
+    )
+    if sizes:
+        middle = len(sizes) // 2
+        if len(sizes) % 2:
+            median_size = float(sizes[middle])
+        else:
+            median_size = (
+                sizes[middle - 1] + sizes[middle]
+            ) / 2.0
+        average_size = sum(sizes) / len(sizes)
+        max_size = max(sizes)
+    else:
+        median_size = 0.0
+        average_size = 0.0
+        max_size = 0
+
+    coverage = {
+        "input_current_messages": len(input_keys),
+        "event_candidates": len(finalized),
+        "singleton_candidates": sum(
+            1
+            for candidate in finalized
+            if candidate["messages_count"] == 1
+        ),
+        "full_evidence_messages": full_evidence_count,
+        "near_duplicate_supporting_refs": supporting_count,
+        "unassigned_messages": 0,
+        "duplicate_assignments": 0,
+    }
+    stats = {
+        "strong_groups": sum(
+            1
+            for candidate in finalized
+            if "strong_source" in candidate["relation_types"]
+        ),
+        "lexical_assisted_candidates": sum(
+            1
+            for candidate in finalized
+            if "lexical_candidate" in candidate["relation_types"]
+        ),
+        "max_candidate_size": max_size,
+        "average_candidate_size": average_size,
+        "median_candidate_size": median_size,
+    }
+    return {
+        "candidates": finalized,
+        "coverage": coverage,
+        "stats": stats,
+    }
+
+
+def _render_event_candidate(candidate):
+    lines = [
+        f"## CANDIDATE {candidate['candidate_id']}",
+        "",
+        f"LATEST: {candidate['latest']}",
+        f"EARLIEST: {candidate['earliest']}",
+        f"MESSAGES: {candidate['messages_count']}",
+        f"SOURCES: {candidate['sources_count']}",
+        f"RELATION: {candidate['relation']}",
+        "",
+        "MEMBER_REFS:",
+    ]
+    for ref in candidate["member_refs"]:
+        line = (
+            f"- {ref['message_key']} | "
+            f"{ref.get('channel') or ''} | "
+            f"{ref.get('date_local') or ''}"
+        )
+        if ref.get("source_url"):
+            line += f" | SOURCE_URL: {ref['source_url']}"
+        lines.append(line)
+
+    supporting_refs = candidate.get("supporting_refs") or []
+    if supporting_refs:
+        lines.extend(["", "SUPPORTING_REFS:"])
+        for ref in supporting_refs:
+            line = (
+                f"- {ref['message_key']} | "
+                f"{ref.get('channel') or ''} | "
+                f"{ref.get('date_local') or ''}"
+            )
+            if ref.get("source_url"):
+                line += f" | SOURCE_URL: {ref['source_url']}"
+            if ref.get("retained_as"):
+                line += f" | RETAINED_AS: {ref['retained_as']}"
+            lines.append(line)
+
+    lines.extend(["", "EVIDENCE:", ""])
+    for message in candidate.get("evidence_messages") or []:
+        lines.append(_ai_message_block(message))
+
+    return "\n".join(lines)
+
+
 def render_ai_friendly_markdown(payload):
     """
-    Плоский, самодостаточный AI-facing экспорт без предварительной суммаризации.
-    Содержательные текущие сообщения не сокращаются и не ранжируются.
-    Чистые media-only placeholders остаются в canonical JSON, но не шумят здесь.
+    Candidate-first AI-facing export without local summarization or ranking.
+
+    Canonical JSON stays untouched. Textless media-only placeholders are omitted
+    from this view exactly as in profile 8.4; all remaining current messages are
+    covered exactly once by MEMBER_REFS, with only proven similar_message_refs
+    allowed to replace repeated full evidence with SUPPORTING_REFS.
     """
-    meta = payload.get("meta") or {}
     all_current_messages = [
         *list(payload.get("news_messages") or []),
         *list(payload.get("operational_messages") or []),
@@ -5929,27 +6579,20 @@ def render_ai_friendly_markdown(payload):
     current_messages = [
         item
         for item in all_current_messages
-        if not _is_textless_media_only_for_ai(item)
+        if isinstance(item, dict)
+        and not _is_textless_media_only_for_ai(item)
     ]
-    omitted_media_only = (
-        len(all_current_messages)
-        - len(current_messages)
-    )
-    current_messages.sort(
-        key=lambda item: (
-            item.get("date_local")
-            or item.get("date_utc")
-            or "",
-            item.get("channel_id") or 0,
-            item.get("message_id") or 0,
-        ),
-        reverse=True,
-    )
+    omitted_media_only = len(all_current_messages) - len(current_messages)
+
+    candidate_layer = build_event_candidates(current_messages)
+    candidates = candidate_layer["candidates"]
+    coverage = candidate_layer["coverage"]
 
     dates = [
         item.get("date_local") or item.get("date_utc")
         for item in all_current_messages
-        if item.get("date_local") or item.get("date_utc")
+        if isinstance(item, dict)
+        and (item.get("date_local") or item.get("date_utc"))
     ]
     interval = ""
     if dates:
@@ -5958,8 +6601,17 @@ def render_ai_friendly_markdown(payload):
     lines = [
         "# TelegramNewsAI — материал для ИИ",
         "",
-        f"DIGEST_PROFILE: {meta.get('digest_profile_version') or DIGEST_PROFILE_VERSION}",
-        f"CURRENT_MESSAGES: {len(current_messages)}",
+        f"DIGEST_PROFILE: {DIGEST_PROFILE_VERSION}",
+        f"INPUT_CURRENT_MESSAGES: {coverage['input_current_messages']}",
+        f"EVENT_CANDIDATES: {coverage['event_candidates']}",
+        f"SINGLETON_CANDIDATES: {coverage['singleton_candidates']}",
+        f"FULL_EVIDENCE_MESSAGES: {coverage['full_evidence_messages']}",
+        (
+            "NEAR_DUPLICATE_SUPPORTING_REFS: "
+            f"{coverage['near_duplicate_supporting_refs']}"
+        ),
+        f"UNASSIGNED_MESSAGES: {coverage['unassigned_messages']}",
+        f"DUPLICATE_ASSIGNMENTS: {coverage['duplicate_assignments']}",
         f"OMITTED_MEDIA_ONLY: {omitted_media_only}",
     ]
     if interval:
@@ -5969,17 +6621,18 @@ def render_ai_friendly_markdown(payload):
         "",
         "## Задача",
         "",
-        str(meta.get("recommended_digest_request") or DIGEST_REQUEST).strip(),
+        CANDIDATE_GUIDANCE,
         "",
-        "## Текущие сообщения",
+        DIGEST_REQUEST.strip(),
         "",
-        "Текущие сообщения ниже идут от новых к старым; DATE_LOCAL сохраняет точное время. "
-        "RELATED_HINT — только подсказка о возможном общем источнике, не готовая кластеризация событий.",
+        "## Кандидаты событий",
+        "",
+        "Candidates идут от новых к старым по LATEST. Локальный слой не создаёт заголовки, summary, важность или truth-оценку.",
         "",
     ])
 
-    for message in current_messages:
-        lines.append(_ai_message_block(message))
+    for candidate in candidates:
+        lines.append(_render_event_candidate(candidate))
 
     continuity = payload.get("continuity_context") or {}
     continuity_messages = continuity.get("messages") or []
@@ -6373,9 +7026,11 @@ def _v4_save_output(
             ),
             "usage_hint": (
                 "Это полный канонический машинный экспорт. Для внешнего ИИ рядом "
-                "создаётся более простой ДАЙДЖЕСТ_ДЛЯ_ИИ.md без предварительной "
-                "суммаризации и без потери текстового содержания текущих сообщений; "
-                "чистые media-only без подписи остаются только в каноническом JSON. "
+                "создаётся candidate-first ДАЙДЖЕСТ_ДЛЯ_ИИ.md без предварительной "
+                "суммаризации: каждое содержательное текущее сообщение трассируется "
+                "через candidate, а доказанные near-duplicates могут быть представлены "
+                "SUPPORTING_REFS вместо повторного полного текста; чистые media-only "
+                "без подписи остаются только в каноническом JSON. "
                 "Редакционная инструкция "
                 "также остаётся в recommended_digest_request. Программа не отправляет "
                 "файлы во внешние сервисы автоматически."
