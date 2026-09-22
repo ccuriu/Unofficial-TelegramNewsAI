@@ -3506,7 +3506,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("**Источник:** Канал — https://t.me/...", rules)
         self.assertIn("Google или redirect-ссылкой", rules)
         self.assertIn("utm_source", rules)
-        self.assertIn("сокращение", rules)
+        self.assertIn("не сокращай", rules)
         self.assertIn("нормализация", rules)
         self.assertIn("изменение query", rules)
         self.assertIn("восстановление по памяти", rules)
