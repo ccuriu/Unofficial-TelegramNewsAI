@@ -3564,7 +3564,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.6")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.7")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -3822,6 +3822,112 @@ class OfflineRegressionTests(unittest.TestCase):
                     layer["candidates"][0]["relation_reasons"],
                 )
 
+    def test_event_candidate_lexical_different_explicit_meetings_stay_separate(self):
+        first = self._candidate_message(
+            1,
+            1,
+            20,
+            "Встреча Арлена с Бореком возможна, заявил Марко Рубио.",
+        )
+        second = self._candidate_message(
+            1,
+            2,
+            10,
+            "Встреча Кадена с Дорианом ожидается, заявил Марко Рубио.",
+        )
+
+        layer = collector.build_event_candidates([first, second])
+
+        self.assertEqual(len(layer["candidates"]), 2)
+        self.assertEqual(layer["coverage"]["unassigned_messages"], 0)
+        self.assertEqual(layer["coverage"]["duplicate_assignments"], 0)
+
+    def test_event_candidate_same_meeting_pair_still_lexically_merges(self):
+        first = self._candidate_message(
+            1,
+            1,
+            20,
+            "Встреча Арлена с Бореком состоится завтра в столице.",
+        )
+        second = self._candidate_message(
+            1,
+            2,
+            10,
+            "Встреча Арлена с Бореком запланирована на завтра в столице.",
+        )
+
+        layer = collector.build_event_candidates([first, second])
+
+        self.assertEqual(len(layer["candidates"]), 1)
+        self.assertEqual(
+            layer["candidates"][0]["relation"],
+            "lexical_candidate",
+        )
+
+    def test_event_candidate_publisher_credit_is_not_same_channel_event_anchor(self):
+        first = self._candidate_message(
+            1,
+            1,
+            20,
+            "Orion council approved harbor budget, сообщает Frank Media "
+            "со ссылкой на источник.",
+        )
+        second = self._candidate_message(
+            1,
+            2,
+            10,
+            "Lumen holding appointed finance director, сообщает Frank Media "
+            "со ссылкой на источник.",
+        )
+
+        layer = collector.build_event_candidates([first, second])
+
+        self.assertEqual(len(layer["candidates"]), 2)
+
+    def test_event_candidate_publisher_credit_cannot_attach_unrelated_cross_channel_story(self):
+        budget_new = self._candidate_message(
+            1,
+            1,
+            30,
+            "Budget talks face political collapse in Lumen — Financial Times\n\n"
+            "The possibility of agreement is significantly restricted, "
+            "the report writes.",
+        )
+        budget_old = self._candidate_message(
+            2,
+            2,
+            20,
+            "Budget talks face political collapse in Lumen after regional vote.\n\n"
+            "The possibility of agreement is significantly restricted.",
+        )
+        unrelated = self._candidate_message(
+            3,
+            3,
+            10,
+            "Diesel export restriction remains unlikely in Orion — Financial Times\n\n"
+            "The possibility of action is significantly restricted, "
+            "the report writes.",
+        )
+
+        layer = collector.build_event_candidates(
+            [budget_new, budget_old, unrelated]
+        )
+        memberships = {
+            frozenset(
+                ref["message_key"]
+                for ref in candidate["member_refs"]
+            )
+            for candidate in layer["candidates"]
+        }
+
+        self.assertEqual(
+            memberships,
+            {
+                frozenset({"1:1", "2:2"}),
+                frozenset({"3:3"}),
+            },
+        )
+
     def test_event_candidate_near_duplicates_keep_one_full_evidence_and_supporting_ref(self):
         older = self._candidate_message(
             1, 1, 10, "Nearly identical bulletin text retained once."
@@ -4042,7 +4148,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.6", rendered)
+        self.assertIn("DIGEST_PROFILE: 8.7", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
