@@ -3494,7 +3494,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("date_local", request)
         self.assertIn("если надёжно определить интервал нельзя, не придумывай", request)
 
-    def test_source_rules_use_plain_literal_urls(self):
+    def test_source_rules_use_clickable_literal_urls(self):
         rules = collector.SOURCE_RULES
         self.assertIn("Каждый самостоятельный фактический сюжет", rules)
         self.assertIn("источники должны покрывать существенные утверждения", rules)
@@ -3502,18 +3502,17 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("В «Коротко» ставь источник после каждого события", rules)
         self.assertIn("«Главное за период» может не дублировать ссылки", rules)
         self.assertIn("используй ровно эту строку", rules)
-        self.assertIn("Печатай URL обычным текстом, не Markdown-ссылкой", rules)
-        self.assertIn("**Источник:** Канал — https://t.me/...", rules)
-        self.assertIn("Google или redirect-ссылкой", rules)
+        self.assertIn("кликабельной Markdown-ссылкой", rules)
+        self.assertIn("**Источник:** [Канал](https://t.me/...)", rules)
+        self.assertIn("дословно совпадать с исходным", rules)
+        self.assertIn("Google, search или redirect-ссылкой", rules)
         self.assertIn("utm_source", rules)
         self.assertIn("не сокращай", rules)
         self.assertIn("не нормализуй", rules)
         self.assertIn("не меняй query", rules)
         self.assertIn("не «исправляй» по памяти", rules)
-        self.assertIn("исходную literal URL", rules)
+        self.assertIn("исходную literal URL как цель Markdown-ссылки", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
-        self.assertNotIn("[Канал](url)", rules)
-        self.assertNotIn("[Канал A](url)", rules)
 
     def test_editorial_rules_prioritize_late_updates_preserve_certainty_and_avoid_topic_merge(self):
         rules = collector.EDITORIAL_PRINCIPLES
@@ -3564,7 +3563,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.7")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.8")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -4148,7 +4147,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.7", rendered)
+        self.assertIn("DIGEST_PROFILE: 8.8", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
@@ -4475,7 +4474,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn("schema 8", readme)
-        self.assertIn("digest profile 8.7", readme)
+        self.assertIn("digest profile 8.8", readme)
         self.assertIn("Telethon остаётся production-транспортом", readme)
         self.assertIn(
             "точные критерии и лимиты не раскрываются",
