@@ -3511,7 +3511,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не нормализуй", rules)
         self.assertIn("не меняй query", rules)
         self.assertIn("не «исправляй» по памяти", rules)
-        self.assertIn("исходный literal URL", rules)
+        self.assertIn("URL не придумывай", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
 
     def test_editorial_rules_prioritize_late_updates_preserve_certainty_and_avoid_topic_merge(self):
