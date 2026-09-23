@@ -7088,6 +7088,44 @@ def render_ai_friendly_markdown(payload):
 
     return "\n".join(lines).rstrip() + "\n"
 
+def _replace_ai_export_file(temporary, destination):
+    try:
+        os.replace(temporary, destination)
+        return
+    except PermissionError:
+        # Windows may allow an already-open file to be rewritten while refusing
+        # rename/replace. Keep the fully written temporary file as the source of
+        # truth, and fall back only when the destination already exists.
+        if not destination.exists():
+            raise
+
+    new_bytes = temporary.read_bytes()
+    original_bytes = destination.read_bytes()
+    try:
+        with destination.open("r+b") as handle:
+            handle.seek(0)
+            handle.write(new_bytes)
+            handle.truncate()
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            with destination.open("r+b") as handle:
+                handle.seek(0)
+                handle.write(original_bytes)
+                handle.truncate()
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            pass
+        raise
+
+    try:
+        temporary.unlink()
+    except OSError:
+        pass
+
+
 def write_ai_friendly_export(payload, destination=None):
     destination = Path(destination or AI_LATEST_FILE)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -7096,7 +7134,7 @@ def write_ai_friendly_export(payload, destination=None):
         render_ai_friendly_markdown(payload),
         encoding="utf-8",
     )
-    os.replace(temporary, destination)
+    _replace_ai_export_file(temporary, destination)
     return destination
 
 
