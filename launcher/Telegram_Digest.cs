@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Unofficial TelegramNewsAI")]
-[assembly: AssemblyDescription("Запуск Unofficial TelegramNewsAI 5.5.0 Testing")]
+[assembly: AssemblyDescription("Запуск Unofficial TelegramNewsAI 5.5.0 Stable")]
 [assembly: AssemblyProduct("Unofficial TelegramNewsAI")]
 [assembly: AssemblyVersion("5.5.0.0")]
 [assembly: AssemblyFileVersion("5.5.0.0")]
