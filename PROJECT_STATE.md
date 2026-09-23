@@ -7,7 +7,7 @@ Updated: 2026-09-23
 - Release: `5.5.0 Stable`
 - Stable release commit: `c21fe3c8a7c2ac2ea9fe416f8fd5c0f1e43b89c9`
 - Export schema: `8`
-- Digest profile: `8.7`
+- Digest profile: `8.8`
 - Maximum selected sources: `50`
 - Production Telegram transport: Telethon / MTProto
 - Web-preview: research only, not production
@@ -18,6 +18,7 @@ Updated: 2026-09-23
 - No FloodWait, retries, account/session safety signals or forced reauthorization in accepted RUN 3
 - SQLite `PRAGMA quick_check = ok`
 - Profile 8.7 event-candidate acceptance: PASS
+- Profile 8.8 clickable source-link regression: pending PR CI
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
