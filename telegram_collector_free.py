@@ -47,7 +47,7 @@ APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 # Схема 8 не повторяет одинаковые text/raw_text и отделяет изменения
 # старых публикаций от основного временного окна дайджеста.
 EXPORT_SCHEMA_VERSION = 8
-DIGEST_PROFILE_VERSION = "8.8"
+DIGEST_PROFILE_VERSION = "8.9"
 MAX_SELECTED_CHANNELS = 50
 
 APP_DIR = Path(__file__).resolve().parent
@@ -5648,6 +5648,12 @@ SOURCE_RULES = (
 )
 
 
+OUTPUT_FORMAT_RULES = (
+    "Готовый дайджест выводи обычным сообщением чата. Не помещай его в writing block, кодовый блок или другой контейнер, "
+    "где Markdown-ссылки могут отображаться как обычный текст."
+)
+
+
 DIGEST_REQUEST = (
     "Подготовь редакторский дайджест за выбранный период. У точных повторов inherited_fields восстанавливай по "
     "inherits_from_message_key. Основной дайджест всегда строй по всему содержательному материалу news_messages и operational_messages. "
@@ -7042,6 +7048,8 @@ def render_ai_friendly_markdown(payload):
         "## Задача",
         "",
         CANDIDATE_GUIDANCE,
+        "",
+        OUTPUT_FORMAT_RULES,
         "",
         DIGEST_REQUEST.strip(),
         "",

@@ -3514,6 +3514,23 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("URL не придумывай", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
 
+    def test_output_format_rules_keep_digest_in_plain_chat(self):
+        rules = collector.OUTPUT_FORMAT_RULES
+        self.assertIn("обычным сообщением чата", rules)
+        self.assertIn("writing block", rules)
+        self.assertIn("кодовый блок", rules)
+        rendered = collector.render_ai_friendly_markdown({
+            "news_messages": [],
+            "operational_messages": [],
+            "continuity_context": {},
+            "changes_since_previous_digest": {},
+        })
+        self.assertIn("Готовый дайджест выводи обычным сообщением чата", rendered)
+        self.assertLess(
+            rendered.index("Готовый дайджест выводи обычным сообщением чата"),
+            rendered.index("Подготовь редакторский дайджест"),
+        )
+
     def test_editorial_rules_prioritize_late_updates_preserve_certainty_and_avoid_topic_merge(self):
         rules = collector.EDITORIAL_PRINCIPLES
         self.assertIn("самое позднее состояние по времени", rules)
@@ -3563,7 +3580,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.8")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.9")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -4147,7 +4164,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.8", rendered)
+        self.assertIn("DIGEST_PROFILE: 8.9", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
@@ -4474,7 +4491,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn("schema 8", readme)
-        self.assertIn("digest profile 8.8", readme)
+        self.assertIn("digest profile 8.9", readme)
         self.assertIn("Telethon остаётся production-транспортом", readme)
         self.assertIn(
             "точные критерии и лимиты не раскрываются",
