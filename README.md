@@ -5,14 +5,14 @@
 </p>
 
 > [!NOTE]
-> **Текущая версия — 5.5.0 Testing.** Перед финальной реальной приёмкой первого Stable точечно усилен MTProto-профиль, а после RUN 1 добавлен плоский `ДАЙДЖЕСТ_ДЛЯ_ИИ.md` для внешних моделей; профиль 8.7 сначала строит детерминированные event candidates с полным coverage текущих содержательных сообщений, сохраняет кандидаты от новых к старым, не выводит чистые media-only placeholders и требует literal URL обычным текстом. Канонический JSON schema 8 остаётся полным техническим экспортом. Telethon остаётся production-транспортом; Web-preview остаётся только исследованной альтернативой. Канал Testing означает, что сетевой профиль ещё проверяется в реальной работе, а не что основная функция проекта приостановлена.
+> **Текущая версия — 5.5.0 Stable.** Это первый принятый Stable для личного сценария TelegramNewsAI с максимум **50 выбранными источниками**. Канонический JSON остаётся на **schema 8**, AI-facing экспорт — на **digest profile 8.7**. Профиль 8.7 строит детерминированные event candidates с полным coverage текущих содержательных сообщений, сохраняет кандидаты от новых к старым, не выводит чистые media-only placeholders и требует literal URL обычным текстом. **Telethon остаётся production-транспортом**; Web-preview остаётся только исследованной альтернативой.
 
 
 [![CI](https://github.com/ccuriu/TelegramNewsAI/actions/workflows/ci.yml/badge.svg)](https://github.com/ccuriu/TelegramNewsAI/actions/workflows/ci.yml)
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Status](https://img.shields.io/badge/status-5.5.0%20Testing-orange)
+![Status](https://img.shields.io/badge/status-5.5.0%20Stable-brightgreen)
 
 **Unofficial TelegramNewsAI — локальная Windows-программа для тех, кто не хочет вручную перечитывать десятки Telegram-каналов после перерыва.** Она собирает публикации выбранных каналов, сохраняет историю в SQLite, догружает пропущенное, ищет по архиву и готовит структурированный JSON для анализа в выбранном ИИ-ассистенте. Программа сама не отправляет содержимое Telegram во внешние AI/ML-сервисы.
 

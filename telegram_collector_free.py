@@ -40,7 +40,7 @@ except ImportError:
     input("Нажмите Enter для выхода...")
     raise SystemExit(1)
 
-APP_VERSION = "5.5.0 Testing"
+APP_VERSION = "5.5.0 Stable"
 APP_DISPLAY_NAME = "Unofficial TelegramNewsAI"
 
 # Версии экспортируемого JSON независимы от версии приложения.
