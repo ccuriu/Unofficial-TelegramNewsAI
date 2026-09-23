@@ -3338,24 +3338,20 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_request_uses_telegram_urls_for_sources(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("SOURCE_URL", request)
-        self.assertIn("telegram_url", request)
-        self.assertIn("channel_url", request)
-        self.assertIn("Markdown-ссылкой", request)
-        self.assertIn("копируй ДОСЛОВНО", request)
-        self.assertIn("URL не придумывай", request)
-        self.assertIn("Google/search/redirect", request)
-        self.assertIn("не «исправляй» по памяти", request)
+        for marker in ("SOURCE_URL", "telegram_url", "channel_url"):
+            self.assertIn(marker, request)
+        self.assertIn("**Источник:** [Канал](URL)", request)
         self.assertIn("URL в скобках копируй ДОСЛОВНО", request)
-        self.assertIn("Каждый самостоятельный фактический сюжет завершай строкой источника", request)
+        self.assertIn("Google/search/redirect", request)
+        self.assertIn("utm_source", request)
+        self.assertIn("не сокращай", request)
+        self.assertIn("не нормализуй", request)
+        self.assertIn("не меняй query", request)
+        self.assertIn("не «исправляй» по памяти", request)
         self.assertIn("для составного — 2–3 ключевых", request)
 
     def test_user_instructions_have_no_separate_post_link_or_color_markers(self):
-        requests = (
-            collector.EDITORIAL_PRINCIPLES
-            + collector.SOURCE_RULES
-            + collector.DIGEST_REQUEST
-        )
+        requests = collector.DIGEST_REQUEST + collector.CANDIDATE_GUIDANCE
         for phrase in (
             "Открыть публикацию",
             "Открыть пост",
@@ -3369,28 +3365,28 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_prompt_has_no_attachment_citation_hacks(self):
         self.assertFalse(hasattr(collector, "NO_ATTACHMENT_CITATIONS_RULE"))
         request = collector.DIGEST_REQUEST.lower()
-        self.assertNotIn("file citations", request)
-        self.assertNotIn("source chips", request)
-        self.assertNotIn("citation вложения", request)
-        self.assertNotIn("дайджест_последний", request)
-        self.assertNotIn("поиск_последний", request)
+        for marker in (
+            "file citations",
+            "source chips",
+            "citation вложения",
+            "дайджест_последний",
+            "поиск_последний",
+        ):
+            self.assertNotIn(marker, request)
 
     def test_digest_request_hides_technical_process(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("Служебные поля", request)
-        self.assertIn("в готовом ответе", request)
-        self.assertIn("Не обсуждай файл, JSON, локальную базу", request)
-        self.assertIn("changes_since_previous_digest", request)
-        self.assertIn("related_message_groups", request)
-        self.assertIn("inherits_from_message_key", request)
+        self.assertIn("Не показывай служебный процесс", request)
+        self.assertIn("не обсуждай файл, JSON, базу", request)
+        self.assertIn("синхронизацию, дедупликацию или алгоритм", request)
+        self.assertIn("Не объясняй читателю внутренние правила охвата или сравнения", request)
 
     def test_digest_request_is_topic_neutral_and_automatic(self):
         request = collector.DIGEST_REQUEST.lower()
         for fixed_topic in ("харьков", "украина", "война"):
             self.assertNotIn(fixed_topic, request)
-        self.assertIn("тематика заранее неизвестна", request)
-        self.assertIn("без фиксированных рубрик", request)
         self.assertIn("по фактическому материалу", request)
+        self.assertIn("без фиксированных рубрик", request)
         self.assertIn("заголовки делай короткими", request)
 
     def test_digest_request_limits_editorial_inference(self):
@@ -3399,11 +3395,10 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("независимое подтверждение", request)
         self.assertIn("редакционный вывод", request)
         self.assertIn("не используй общие знания модели", request)
-        self.assertIn("не добавляй существенные факты, географию", request)
-        self.assertIn("участников, мотивы, последствия или причинность", request)
-        self.assertIn("если данных для вывода недостаточно", request)
+        self.assertIn("добавления фактов, географии, участников, мотивов, последствий или причинности", request)
+        self.assertIn("если данных недостаточно", request)
         self.assertIn("перепечатки одного исходного сообщения не считай независимыми подтверждениями", request)
-        self.assertIn("количество публикаций само по себе не делает сюжет важнее", request)
+        self.assertIn("количество публикаций не определяет важность или достоверность", request)
         for confidence in (
             "подтверждено",
             "вероятно",
@@ -3412,78 +3407,67 @@ class OfflineRegressionTests(unittest.TestCase):
             "мнение/оценка",
         ):
             self.assertIn(confidence, request)
-        self.assertIn("similar_message_refs", request)
-        self.assertIn("это не доказательство одного события", request)
+        self.assertIn("relation-подсказки", request)
+        self.assertIn("не являются доказательством одного события", request)
 
     def test_digest_request_handles_mixed_languages_without_separate_buckets(self):
         request = collector.DIGEST_REQUEST
         self.assertIn("на языке запроса пользователя", request)
         self.assertIn("если язык запроса не указан или неясен, пиши по-русски", request)
         self.assertIn("Иноязычные публикации переводи по смыслу", request)
-        self.assertIn("сохраняя имена, числа, цитируемые факты", request)
+        self.assertIn("сохраняя имена, числа, цитируемые факты и ссылки", request)
         self.assertIn("Не разделяй источники по языку", request)
-        self.assertIn(
-            "русско-, украино- и англоязычные сообщения одного события объединяй в один сюжет",
-            request,
-        )
+        self.assertIn("сообщения одного события объединяй независимо от языка", request)
 
     def test_digest_request_keeps_adaptive_compact_structure(self):
         request = collector.DIGEST_REQUEST
         self.assertIn("«Главное за период»", request)
-        self.assertIn("не ставь перед ним второй абзац с тем же резюме", request)
+        self.assertIn("без второго вступительного резюме", request)
         self.assertIn("Однотипные оперативные предупреждения одного сюжета объединяй", request)
-        self.assertIn("changes_since_previous_digest.comparison_available=true", request)
-        self.assertIn("глубину каждого сюжета определяй количеством реально новой информации", request)
-        self.assertIn("не ограничивай этим число сюжетов", request)
-        self.assertIn("собери в «Коротко» вместо того, чтобы опустить их", request)
+        self.assertIn("Глубину сюжета определяй количеством реально новой информации", request)
+        self.assertIn("не ограничивая число сюжетов", request)
+        self.assertIn("Значимые события без отдельного разбора собери в «Коротко»", request)
         self.assertNotIn("при среднем объёме", request.lower())
         self.assertNotIn("при большом", request.lower())
 
     def test_digest_request_is_completeness_first(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("Сначала учти весь набор текущих сообщений", request)
-        self.assertIn("Не заканчивай дайджест после нескольких самых заметных историй", request)
-        self.assertIn("Каждый самостоятельный содержательно значимый сюжет", request)
-        self.assertIn("полнота важной повестки важнее искусственной краткости", request)
-        self.assertIn("Одиночное важное сообщение нельзя терять", request)
+        self.assertIn("Охвати весь текущий материал", request)
+        self.assertIn("не ограничивайся несколькими самыми заметными историями", request)
+        self.assertIn("каждый самостоятельный содержательно значимый сюжет", request)
+        self.assertIn("важный singleton не пропускай", request)
 
-    def test_related_groups_are_only_a_hint_in_prompt(self):
-        request = collector.DIGEST_REQUEST
-        self.assertIn(
-            "related_message_groups — только подсказка о возможном общем источнике",
-            request,
-        )
-        self.assertIn("не приказ объединять сообщения в одно событие", request)
+    def test_candidate_guidance_treats_relations_as_hints(self):
+        rules = collector.CANDIDATE_GUIDANCE
+        self.assertIn("CANDIDATE — подсказка группировки", rules)
+        self.assertIn("Объединяй или разделяй кандидаты по EVIDENCE", rules)
+        self.assertIn("RELATION — только подсказка, не подтверждение", rules)
+        self.assertIn("MEMBER_REFS и SUPPORTING_REFS обеспечивают покрытие", rules)
+        self.assertIn("Значимый singleton не теряй", rules)
 
-    def test_digest_comparison_never_replaces_full_period(self):
+    def test_digest_period_context_never_replaces_current_period(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("Основной дайджест всегда строй по всему содержательному материалу", request)
-        self.assertIn("changes_since_previous_digest — только дополнительный слой сравнения", request)
-        self.assertIn("не задаёт временные границы основного дайджеста", request)
-        self.assertIn("не является фильтром отбора", request)
-        self.assertIn("не исключай из основного дайджеста", request)
-        self.assertIn("outside_period_changes", request)
-        self.assertIn("не расширяй ими основной временной интервал", request)
-        self.assertIn("continuity_context", request)
-        self.assertIn("lexical_candidate не доказательство", request)
-        self.assertIn("context_message не выдавай за текущую новость", request)
+        self.assertIn("Основной выпуск строй по текущему материалу периода", request)
+        self.assertIn("Предысторию вне периода используй только как контекст развития", request)
+        self.assertIn("изменения вне периода", request)
+        self.assertIn("нельзя расширять основной временной интервал", request)
+        self.assertIn("«Что изменилось»", request)
+        self.assertIn("не используй вместо основного дайджеста", request)
 
     def test_digest_hides_internal_coverage_and_comparison_rules(self):
         request = collector.DIGEST_REQUEST
-        self.assertIn("Не объясняй читателю внутренние правила охвата и сравнения", request)
-        self.assertIn("молча применяй полный период основного выпуска", request)
-        self.assertIn("не комментируя их в готовом тексте", request)
-        self.assertEqual(request.count("Не объясняй читателю внутренние правила охвата и сравнения"), 1)
-        self.assertIn("всего охваченного материала по date_local", request)
-        self.assertIn("а не только сообщений из блока сравнения", request)
-        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
-        self.assertEqual(request.count("changes_since_previous_digest — только дополнительный слой сравнения"), 1)
-        self.assertEqual(request.count("«Что изменилось» не заменяет основной дайджест"), 1)
+        self.assertIn("Не объясняй читателю внутренние правила охвата или сравнения", request)
+        self.assertEqual(
+            request.count("Не объясняй читателю внутренние правила охвата или сравнения"),
+            1,
+        )
+        self.assertIn("фактический локальный интервал из переданного материала", request)
+        self.assertIn("«Что изменилось» добавляй только при существенных изменениях", request)
 
     def test_digest_does_not_end_with_subjective_second_summary(self):
         request = collector.DIGEST_REQUEST
         self.assertIn("не добавляй повторный итог, личный выбор или рейтинг", request)
-        self.assertIn("«Что изменилось» не заменяет основной дайджест", request)
+        self.assertIn("не используй вместо основного дайджеста", request)
         self.assertNotIn("что я бы выделил", request.lower())
         self.assertNotIn("мой выбор", request.lower())
 
@@ -3491,19 +3475,14 @@ class OfflineRegressionTests(unittest.TestCase):
         request = collector.DIGEST_REQUEST
         self.assertIn("В заголовке укажи дату", request)
         self.assertIn("фактический локальный интервал", request)
-        self.assertIn("date_local", request)
-        self.assertIn("если надёжно определить интервал нельзя, не придумывай", request)
+        self.assertIn("если его надёжно определить нельзя, не придумывай", request)
 
     def test_source_rules_use_clickable_literal_urls(self):
         rules = collector.SOURCE_RULES
         self.assertIn("Каждый самостоятельный фактический сюжет", rules)
-        self.assertIn("источники должны покрывать существенные утверждения", rules)
-        self.assertIn("иначе раздели сюжет", rules)
         self.assertIn("В «Коротко» ставь источник после каждого события", rules)
         self.assertIn("«Главное за период» может не дублировать ссылки", rules)
-        self.assertIn("используй ровно эту строку", rules)
-        self.assertIn("Источник оформляй Markdown-ссылкой", rules)
-        self.assertIn("**Источник:** [Канал](https://t.me/...)", rules)
+        self.assertIn("**Источник:** [Канал](URL)", rules)
         self.assertIn("URL в скобках копируй ДОСЛОВНО", rules)
         self.assertIn("Google/search/redirect", rules)
         self.assertIn("utm_source", rules)
@@ -3511,43 +3490,40 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("не нормализуй", rules)
         self.assertIn("не меняй query", rules)
         self.assertIn("не «исправляй» по памяти", rules)
-        self.assertIn("URL не придумывай", rules)
         self.assertIn("для составного — 2–3 ключевых", rules)
+        self.assertIn("покрывающих существенные утверждения", rules)
+        self.assertIn("иначе раздели сюжет", rules)
 
-    def test_output_format_rules_keep_digest_in_plain_chat(self):
+    def test_output_format_rules_are_in_digest_request_once(self):
         rules = collector.OUTPUT_FORMAT_RULES
         self.assertIn("обычным сообщением чата", rules)
         self.assertIn("writing block", rules)
-        self.assertIn("кодовый блок", rules)
+        self.assertIn("кодовом блоке", rules)
+        self.assertIn(rules, collector.DIGEST_REQUEST)
         rendered = collector.render_ai_friendly_markdown({
             "news_messages": [],
             "operational_messages": [],
             "continuity_context": {},
             "changes_since_previous_digest": {},
         })
-        self.assertIn("Готовый дайджест выводи обычным сообщением чата", rendered)
-        self.assertLess(
-            rendered.index("Готовый дайджест выводи обычным сообщением чата"),
-            rendered.index("Подготовь редакторский дайджест"),
-        )
+        marker = "Готовый дайджест выводи обычным сообщением чата"
+        self.assertIn(marker, rendered)
+        self.assertEqual(rendered.count(marker), 1)
 
     def test_editorial_rules_prioritize_late_updates_preserve_certainty_and_avoid_topic_merge(self):
         rules = collector.EDITORIAL_PRINCIPLES
-        self.assertIn("самое позднее состояние по времени", rules)
+        self.assertIn("самое позднее состояние", rules)
         self.assertIn("позднее уточнение имеет приоритет", rules)
-        self.assertIn(
-            "Первоначально сообщалось…, позже выяснилось…",
-            rules,
-        )
+        self.assertIn("Первоначально сообщалось…, позже выяснилось…", rules)
         for marker in (
             "опровергает",
-            "блокирует",
             "уточняет",
+            "блокирует",
             "отменяет",
             "меняет статус",
         ):
             self.assertIn(marker, rules)
-        self.assertIn("Не повышай уверенность относительно источника", rules)
+        self.assertIn("Не повышай уверенность источника", rules)
         self.assertIn("«возможно»", rules)
         self.assertIn("«по данным источника»", rules)
         self.assertIn("«предположительно»", rules)
@@ -3556,31 +3532,51 @@ class OfflineRegressionTests(unittest.TestCase):
             rules,
         )
 
-
     def test_digest_isolated_from_user_profile_and_chat_history(self):
         rules = collector.EDITORIAL_PRINCIPLES
-        self.assertIn("игнорируй сведения о пользователе", rules)
+        self.assertIn("Игнорируй сведения о пользователе", rules)
         self.assertIn("персональную память", rules)
-        self.assertIn("историю текущего и прошлых чатов", rules)
-        self.assertIn("не должны влиять на отбор, порядок, акценты или оценку полезности материала", rules)
+        self.assertIn("историю чатов", rules)
+        self.assertIn("не должны влиять на отбор, порядок или акценты", rules)
         self.assertIn("Не пиши «для вас», «вам особенно важно»", rules)
-        self.assertEqual(rules.count("игнорируй сведения о пользователе"), 1)
+        self.assertEqual(rules.count("Игнорируй сведения о пользователе"), 1)
         self.assertEqual(rules.count("Не пиши «для вас»"), 1)
 
     def test_editorial_rules_do_not_force_analysis_after_every_story(self):
         rules = collector.EDITORIAL_PRINCIPLES
-        self.assertIn("если факты самодостаточны", rules)
+        self.assertIn("Если факты самодостаточны", rules)
         self.assertIn("не дописывай обязательную аналитику", rules)
-        self.assertIn("не ранжируй событие", rules.lower())
+        self.assertIn("не ранжируй события", rules.lower())
+
+    def test_prompt_drops_obsolete_json_field_names(self):
+        request = collector.DIGEST_REQUEST
+        for obsolete in (
+            "inherits_from_message_key",
+            "news_messages",
+            "operational_messages",
+            "related_message_groups",
+            "changes_since_previous_digest",
+            "outside_period_changes",
+            "continuity_context",
+            "context_message",
+            "similar_message_refs",
+        ):
+            self.assertNotIn(obsolete, request)
 
     def test_prompt_size_budget(self):
-        self.assertLess(len(collector.EDITORIAL_PRINCIPLES), 3500)
-        self.assertLess(len(collector.SOURCE_RULES), 1200)
-        self.assertLess(len(collector.DIGEST_REQUEST), 6000)
+        self.assertLess(len(collector.CANDIDATE_GUIDANCE), 400)
+        self.assertLess(len(collector.EDITORIAL_PRINCIPLES), 2800)
+        self.assertLess(len(collector.SOURCE_RULES), 800)
+        self.assertLess(len(collector.OUTPUT_FORMAT_RULES), 250)
+        self.assertLess(len(collector.DIGEST_REQUEST), 5000)
+        self.assertLess(
+            len(collector.CANDIDATE_GUIDANCE) + len(collector.DIGEST_REQUEST),
+            5200,
+        )
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "8.9")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "9.0")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
@@ -4164,7 +4160,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 8.9", rendered)
+        self.assertIn("DIGEST_PROFILE: 9.0", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
@@ -4491,7 +4487,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn("schema 8", readme)
-        self.assertIn("digest profile 8.9", readme)
+        self.assertIn("digest profile 9.0", readme)
         self.assertIn("Telethon остаётся production-транспортом", readme)
         self.assertIn(
             "точные критерии и лимиты не раскрываются",
@@ -4560,8 +4556,8 @@ class OfflineRegressionTests(unittest.TestCase):
         )
         self.assertIn("telegram_url", request)
         self.assertIn("channel_url", request)
-        self.assertIn("иначе используй channel_url", request)
-        self.assertIn("URL не придумывай", request)
+        self.assertIn("URL в скобках копируй ДОСЛОВНО", request)
+        self.assertIn("Google/search/redirect", request)
         self.assertIn("related_message_groups", request)
         self.assertIn("по этой теме, а не по всей повестке", request)
         self.assertIn("редакционный вывод", request)
