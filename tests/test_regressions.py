@@ -4463,20 +4463,20 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn('src="assets/icon.svg"', readme)
         self.assertIn('width="220"', readme)
 
-    def test_readme_testing_status_is_calm_and_does_not_pause_development(self):
+    def test_readme_stable_status_matches_release_contract(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertEqual(collector.APP_VERSION, "5.5.0 Stable")
         self.assertIn(
-            "Текущая версия — 5.5.0 Testing",
+            "Текущая версия — 5.5.0 Stable",
             readme,
         )
         self.assertIn(
-            "сетевой профиль ещё проверяется в реальной работе",
+            "первый принятый Stable для личного сценария TelegramNewsAI",
             readme,
         )
-        self.assertIn(
-            "не что основная функция проекта приостановлена",
-            readme,
-        )
+        self.assertIn("schema 8", readme)
+        self.assertIn("digest profile 8.7", readme)
+        self.assertIn("Telethon остаётся production-транспортом", readme)
         self.assertIn(
             "точные критерии и лимиты не раскрываются",
             readme,
