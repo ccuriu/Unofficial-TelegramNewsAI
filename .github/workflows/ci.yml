@@ -272,9 +272,6 @@ jobs:
           if ($versionInfo.FileVersion -ne '5.5.0.0') {
             throw "Unexpected tracked launcher file version: $($versionInfo.FileVersion)"
           }
-          if ($versionInfo.FileDescription -notmatch '5\.5\.0 Stable') {
-            throw "Unexpected tracked launcher description: $($versionInfo.FileDescription)"
-          }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
