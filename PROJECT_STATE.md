@@ -19,7 +19,7 @@ Updated: 2026-09-24
 - SQLite `PRAGMA quick_check = ok`
 - Profile 8.7 event-candidate acceptance: PASS
 - Profile 8.8 clickable source-link regression: PASS (CI #233, 194 tests)
-- Profile 8.9 plain-chat output regression: pending PR CI
+- Profile 8.9 plain-chat output regression: PASS (CI #236, 195 tests)
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
