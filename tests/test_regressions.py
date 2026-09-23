@@ -4333,6 +4333,38 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertNotIn("[Медиа без подписи: photo]", ai_text)
 
 
+    def test_ai_export_falls_back_when_windows_refuses_replace_of_open_destination(self):
+        destination = collector.OUTPUT_DIR / "ДАЙДЖЕСТ_ДЛЯ_ИИ.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("stale export", encoding="utf-8")
+        payload = {
+            "news_messages": [],
+            "operational_messages": [],
+            "continuity_context": {},
+            "changes_since_previous_digest": {},
+        }
+        expected = collector.render_ai_friendly_markdown(payload)
+
+        with patch.object(
+            collector.os,
+            "replace",
+            side_effect=PermissionError(5, "Access denied"),
+        ):
+            written = collector.write_ai_friendly_export(
+                payload,
+                destination,
+            )
+
+        self.assertEqual(written, destination)
+        self.assertEqual(
+            destination.read_text(encoding="utf-8"),
+            expected,
+        )
+        self.assertFalse(
+            destination.with_name(destination.name + ".tmp").exists()
+        )
+
+
     def test_ai_export_filters_recurring_service_urls_but_keeps_article_urls_literal(self):
         message = {
             "channel_id": 1,
