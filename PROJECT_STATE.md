@@ -1,6 +1,6 @@
 # TelegramNewsAI — Project State
 
-Updated: 2026-09-23
+Updated: 2026-09-24
 
 ## Accepted baseline
 
@@ -18,7 +18,7 @@ Updated: 2026-09-23
 - No FloodWait, retries, account/session safety signals or forced reauthorization in accepted RUN 3
 - SQLite `PRAGMA quick_check = ok`
 - Profile 8.7 event-candidate acceptance: PASS
-- Profile 8.8 clickable source-link regression: pending PR CI
+- Profile 8.8 clickable source-link regression: PASS (CI #233, 194 tests)
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
