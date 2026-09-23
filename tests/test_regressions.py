@@ -3346,7 +3346,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("URL не придумывай", request)
         self.assertIn("Google/search/redirect", request)
         self.assertIn("не «исправляй» по памяти", request)
-        self.assertIn("исходную literal URL", request)
+        self.assertIn("URL в скобках копируй ДОСЛОВНО", request)
         self.assertIn("Каждый самостоятельный фактический сюжет завершай строкой источника", request)
         self.assertIn("для составного — 2–3 ключевых", request)
 
