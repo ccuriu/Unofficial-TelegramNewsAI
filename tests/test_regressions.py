@@ -4166,7 +4166,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "changes_since_previous_digest": {"outside_period_changes": []},
         }
         rendered = collector.render_ai_friendly_markdown(payload)
-        self.assertIn("DIGEST_PROFILE: 9.0", rendered)
+        self.assertIn("DIGEST_PROFILE: 9.1", rendered)
         self.assertIn(collector.CANDIDATE_GUIDANCE, rendered)
         self.assertNotIn("old saved request", rendered)
 
@@ -4525,7 +4525,7 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn("schema 8", readme)
-        self.assertIn("digest profile 9.0", readme)
+        self.assertIn("digest profile 9.1", readme)
         self.assertIn("Telethon остаётся production-транспортом", readme)
         self.assertIn(
             "точные критерии и лимиты не раскрываются",
