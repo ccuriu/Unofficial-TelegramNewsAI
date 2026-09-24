@@ -7,7 +7,7 @@ Updated: 2026-09-24
 - Release: `5.5.0 Stable`
 - Stable release commit: `c21fe3c8a7c2ac2ea9fe416f8fd5c0f1e43b89c9`
 - Export schema: `8`
-- Digest profile: `9.0`
+- Digest profile: `9.1`
 - Maximum selected sources: `50`
 - Production Telegram transport: Telethon / MTProto
 - Web-preview: research only, not production
@@ -21,6 +21,7 @@ Updated: 2026-09-24
 - Profile 8.8 clickable source-link regression: PASS (CI #233, 194 tests)
 - Profile 8.9 plain-chat output regression: PASS (CI #236, 195 tests)
 - Profile 9.0 prompt cleanup regression: PASS (CI #240, 196 tests)
+- Profile 9.1 scoped-request direct source-link regression: PASS (CI #247, 197 tests)
 - Locked AI-export replacement fallback: PASS (CI #243, 197 tests)
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
