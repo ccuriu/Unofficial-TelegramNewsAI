@@ -3499,6 +3499,12 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("обычным сообщением чата", rules)
         self.assertIn("writing block", rules)
         self.assertIn("кодовом блоке", rules)
+        self.assertIn("Любое тематическое уточнение", rules)
+        self.assertIn("меняет только отбор и подачу", rules)
+        self.assertIn("не отменяет правила источников", rules)
+        self.assertIn("SOURCE_URL/telegram_url", rules)
+        self.assertIn("прямую кликабельную ссылку на исходную публикацию Telegram", rules)
+        self.assertIn("не заменяй её ссылкой или цитатой на загруженный файл", rules)
         self.assertIn(rules, collector.DIGEST_REQUEST)
         rendered = collector.render_ai_friendly_markdown({
             "news_messages": [],
@@ -3567,7 +3573,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(len(collector.CANDIDATE_GUIDANCE), 400)
         self.assertLess(len(collector.EDITORIAL_PRINCIPLES), 2800)
         self.assertLess(len(collector.SOURCE_RULES), 800)
-        self.assertLess(len(collector.OUTPUT_FORMAT_RULES), 250)
+        self.assertLess(len(collector.OUTPUT_FORMAT_RULES), 600)
         self.assertLess(len(collector.DIGEST_REQUEST), 5000)
         self.assertLess(
             len(collector.CANDIDATE_GUIDANCE) + len(collector.DIGEST_REQUEST),
@@ -3576,7 +3582,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_digest_profile_version_is_an_independent_export_contract(self):
         self.assertEqual(collector.EXPORT_SCHEMA_VERSION, 8)
-        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "9.0")
+        self.assertEqual(collector.DIGEST_PROFILE_VERSION, "9.1")
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('"schema_version": EXPORT_SCHEMA_VERSION', source)
         self.assertIn('"digest_profile_version": DIGEST_PROFILE_VERSION', source)
