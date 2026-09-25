@@ -4504,7 +4504,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("Unofficial-TelegramNewsAI-*-Windows.zip", updater)
         self.assertIn("-WaitForExit", updater)
         self.assertIn("не будет принудительно закрыта", updater)
-        self.assertIn("telegram_session", updater.lower())
+        self.assertIn("update.ps1", updater)
+        self.assertIn("Повторная авторизация не требуется", updater)
         self.assertNotIn("Stop-Process", updater)
 
     def test_release_builder_emits_standalone_updater_outside_zip(self):
