@@ -38,10 +38,11 @@ Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
 
 ## GitHub admin cleanup перед Public
 
-- [ ] Удалить или осознанно оставить только нужные ветки. Устаревшие: `ci/continuity-5.5.0-validation`, `experiment/web-preview-collector`, `feature/continuity-context-5.5.0`, `fix/run3-lexical-overmerge`.
-- [ ] Удалить исторические tags `v5.4.1`–`v5.4.10`: они не являются текущей 5.5.0 baseline.
-- [ ] Удалить старые GitHub Releases `v5.4.7`–`v5.4.10`; они не должны выглядеть как рекомендуемая текущая сборка.
-- [ ] На странице About изменить описание на нейтральное публичное и убрать вводящий в заблуждение topic `ai` (встроенного AI API нет).
+- [x] Удалены устаревшие ветки; в репозитории остался только `main`.
+- [x] Удалены исторические tags `v5.4.1`–`v5.4.10`.
+- [x] Удалены старые GitHub Releases `v5.4.7`–`v5.4.10`; текущего публичного бинарного Release пока нет.
+- [x] Описание репозитория уже нейтральное и соответствует локальной функции программы.
+- [ ] Убрать вводящий в заблуждение topic `ai` (встроенного AI API нет).
 - [ ] После cleanup переключить repository visibility private → public.
 - [ ] Сразу после открытия проверить публичную главную страницу, Actions, Releases, Issues и Security/secret scanning.
 
