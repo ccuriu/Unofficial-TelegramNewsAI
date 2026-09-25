@@ -2,7 +2,6 @@
 chcp 65001 >nul
 setlocal
 set "TELEGRAMNEWSAI_UPDATER_SELF=%~f0"
-set "TELEGRAMNEWSAI_UPDATER_RELEASE=%~1"
 title Обновление Unofficial TelegramNewsAI
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$self=$env:TELEGRAMNEWSAI_UPDATER_SELF; $raw=[IO.File]::ReadAllText($self,[Text.Encoding]::UTF8); $marker=':__POWERSHELL_PAYLOAD__'; $index=$raw.LastIndexOf($marker,[StringComparison]::Ordinal); if($index -lt 0){Write-Error 'Updater payload not found.'; exit 2}; $script=$raw.Substring($index+$marker.Length); & ([ScriptBlock]::Create($script))"
@@ -19,16 +18,18 @@ exit /b %code%
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 
+$repository = 'ccuriu/Unofficial-TelegramNewsAI'
 $registryPath = 'HKCU:\Software\Unofficial TelegramNewsAI'
 $shortcutName = 'Unofficial TelegramNewsAI.lnk'
-$selfPath = [IO.Path]::GetFullPath($env:TELEGRAMNEWSAI_UPDATER_SELF)
-$selfDir = Split-Path -Parent $selfPath
-$requestedRelease = [Environment]::ExpandEnvironmentVariables(
-    [string]$env:TELEGRAMNEWSAI_UPDATER_RELEASE
-)
+$githubHeaders = @{
+    'User-Agent' = 'Unofficial-TelegramNewsAI-Updater'
+    'Accept' = 'application/vnd.github+json'
+}
 
-function Get-Sha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+}
+catch {
 }
 
 function Test-InstallationFolder([string]$Path) {
@@ -146,121 +147,208 @@ function Resolve-InstallationFolder {
     }
 
     if ($candidates.Count -gt 1) {
-        Write-Host 'Найдено несколько установок:'
-        $candidates | ForEach-Object { Write-Host "  $_" }
-        return Select-InstallationFolder 'Выберите папку той установки Unofficial TelegramNewsAI, которую нужно обновить.'
+        return Select-InstallationFolder 'Найдено несколько установок. Выберите ту, которую нужно обновить.'
     }
 
     return Select-InstallationFolder 'Установка автоматически не найдена. Выберите папку установленного Unofficial TelegramNewsAI.'
 }
 
-function Select-ReleaseZip {
-    Add-Type -AssemblyName System.Windows.Forms
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = 'Выберите новый release ZIP Unofficial TelegramNewsAI'
-    $dialog.Filter = 'Unofficial TelegramNewsAI (*.zip)|Unofficial-TelegramNewsAI-*-Windows.zip|ZIP (*.zip)|*.zip'
-    $dialog.CheckFileExists = $true
-    $dialog.Multiselect = $false
-    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-        throw 'Обновление отменено: release ZIP не выбран.'
-    }
-    return [IO.Path]::GetFullPath($dialog.FileName)
+function Invoke-GitHubJson([string]$Url) {
+    return Invoke-RestMethod -Uri $Url -Headers $githubHeaders -Method Get -TimeoutSec 30
 }
 
-function Resolve-ReleaseZip {
-    if ($requestedRelease) {
-        $candidate = [IO.Path]::GetFullPath($requestedRelease)
-        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            throw "Указанный release ZIP не найден: $candidate"
-        }
-        if ([IO.Path]::GetExtension($candidate) -ine '.zip') {
-            throw "Ожидался ZIP-файл release: $candidate"
-        }
-        return $candidate
+function Resolve-LatestStableRelease {
+    Write-Host 'Проверяю последнюю опубликованную Stable-версию...'
+    $release = Invoke-GitHubJson -Url "https://api.github.com/repos/$repository/releases/latest"
+
+    if (-not $release -or $release.draft -or $release.prerelease) {
+        throw 'GitHub не вернул опубликованный Stable Release.'
     }
 
-    $nearby = @(
-        Get-ChildItem -LiteralPath $selfDir -Filter 'Unofficial-TelegramNewsAI-*-Windows.zip' -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending
+    $tag = [string]$release.tag_name
+    if ([string]::IsNullOrWhiteSpace($tag)) {
+        throw 'У последнего Stable Release отсутствует tag.'
+    }
+
+    $tagEncoded = [Uri]::EscapeDataString($tag)
+    $commit = Invoke-GitHubJson -Url "https://api.github.com/repos/$repository/commits/$tagEncoded"
+    $sha = [string]$commit.sha
+    if ($sha -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Не удалось определить неизменяемый commit последнего Stable Release.'
+    }
+
+    return @{
+        Tag = $tag
+        Sha = $sha.ToLowerInvariant()
+        Name = [string]$release.name
+    }
+}
+
+function Assert-RelativeProgramPath([string]$Name) {
+    if (
+        [string]::IsNullOrWhiteSpace($Name) -or
+        [IO.Path]::IsPathRooted($Name) -or
+        $Name -match '(^|[\\/])\.\.([\\/]|$)'
+    ) {
+        throw "Небезопасный путь в release manifest: $Name"
+    }
+}
+
+function Test-ProtectedStateName([string]$Name) {
+    $normalized = $Name -replace '/', '\'
+    $leaf = [IO.Path]::GetFileName($normalized)
+    return (
+        $leaf -ieq 'credentials.bin' -or
+        $leaf -like 'credentials.unreadable-*.bin' -or
+        $leaf -like '*.session' -or
+        $leaf -like '*.session-journal' -or
+        $leaf -ieq 'selected_channels.json' -or
+        $leaf -ieq 'settings_free.json' -or
+        $leaf -ieq 'news.db' -or
+        $leaf -like 'news.db-*' -or
+        $normalized -match '(^|\\)(Дайджесты|logs|Резервные_копии|models|\.venv|__pycache__)(\\|$)'
     )
-    if ($nearby.Count -eq 1) {
-        return $nearby[0].FullName
-    }
-
-    if ($nearby.Count -gt 1) {
-        Write-Host 'Рядом с updater найдено несколько release ZIP. Выберите нужный файл.'
-    }
-    return Select-ReleaseZip
 }
 
-function Assert-ZipChecksumIfPresent([string]$ZipPath) {
-    $checksumPath = [IO.Path]::ChangeExtension($ZipPath, $null) + '.sha256.txt'
-    if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
-        Write-Host 'Файл SHA-256 рядом с ZIP не найден; целостность программных файлов дополнительно проверит штатный updater.'
-        return
-    }
-
-    $expected = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split '\s+')[0].ToUpperInvariant()
-    $actual = Get-Sha256 $ZipPath
-    if (-not $expected -or $expected -ine $actual) {
-        throw 'SHA-256 release ZIP не совпадает. Обновление остановлено.'
-    }
-    Write-Host 'SHA-256 release ZIP: OK'
+function Get-RawRepositoryUrl([string]$CommitSha, [string]$RelativePath) {
+    Assert-RelativeProgramPath $RelativePath
+    $normalized = $RelativePath -replace '\', '/'
+    $safePath = (($normalized.Split('/') | ForEach-Object {
+        [Uri]::EscapeDataString($_)
+    }) -join '/')
+    return "https://raw.githubusercontent.com/$repository/$CommitSha/$safePath"
 }
 
-function Set-InstallRegistration([string]$Path) {
-    try {
-        if (-not (Test-Path -LiteralPath $registryPath)) {
-            New-Item -Path $registryPath -Force | Out-Null
+function Download-RepositoryFile(
+    [string]$CommitSha,
+    [string]$RelativePath,
+    [string]$Destination
+) {
+    $parent = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $url = Get-RawRepositoryUrl $CommitSha $RelativePath
+    Invoke-WebRequest -Uri $url -Headers $githubHeaders -OutFile $Destination -UseBasicParsing -TimeoutSec 60
+
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        throw "GitHub не вернул обязательный файл: $RelativePath"
+    }
+}
+
+function Assert-DirectUpdateManifest($Manifest) {
+    $programFiles = @($Manifest.ProgramFiles)
+    $obsoleteFiles = @($Manifest.ObsoleteFiles)
+
+    if (-not $programFiles.Count) {
+        throw 'Release manifest не содержит ProgramFiles.'
+    }
+
+    $seen = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($name in @($programFiles + $obsoleteFiles)) {
+        Assert-RelativeProgramPath $name
+        if (Test-ProtectedStateName $name) {
+            throw "Release manifest пытается управлять пользовательским файлом: $name"
         }
-        New-ItemProperty -Path $registryPath -Name InstallPath -Value $Path -PropertyType String -Force | Out-Null
+    }
+
+    foreach ($name in $programFiles) {
+        if (-not $seen.Add([string]$name)) {
+            throw "Повторяющийся файл в ProgramFiles: $name"
+        }
+    }
+
+    foreach ($required in @(
+        'update.ps1',
+        'release_manifest.json',
+        'telegram_collector_free.py',
+        'Telegram_Digest.exe',
+        'Telegram_Digest.exe.sha256'
+    )) {
+        if ($required -notin $programFiles) {
+            throw "Release manifest не содержит обязательный файл: $required"
+        }
+    }
+
+    return @{
+        ProgramFiles = $programFiles
+        ObsoleteFiles = $obsoleteFiles
+    }
+}
+
+function Get-AppVersion([string]$Root) {
+    $collector = Join-Path $Root 'telegram_collector_free.py'
+    if (-not (Test-Path -LiteralPath $collector -PathType Leaf)) {
+        return $null
+    }
+    $match = Select-String -LiteralPath $collector -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' |
+        Select-Object -First 1
+    if (-not $match) {
+        return $null
+    }
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Show-CompletionMessage([string]$Version) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $text = if ($Version) {
+            "Обновление установлено.\r\nВерсия: $Version\r\nПрограмма в актуальном состоянии."
+        }
+        else {
+            "Обновление установлено.\r\nПрограмма в актуальном состоянии."
+        }
+        [void][System.Windows.Forms.MessageBox]::Show(
+            $text,
+            'Unofficial TelegramNewsAI',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
     }
     catch {
-        Write-Host 'Предупреждение: не удалось сохранить путь установки в профиле Windows.'
     }
 }
 
 $tempRoot = $null
 try {
     $target = Resolve-InstallationFolder
-    $zipPath = Resolve-ReleaseZip
+    $release = Resolve-LatestStableRelease
 
     Write-Host ''
     Write-Host "Установка: $target"
-    Write-Host "Release ZIP: $zipPath"
-    Write-Host ''
-
-    Assert-ZipChecksumIfPresent $zipPath
+    Write-Host "Последний Stable: $($release.Tag)"
+    Write-Host 'Скачиваю только программные файлы напрямую из публичного репозитория...'
 
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) (
-        'TelegramNewsAI-portable-update-' + [guid]::NewGuid().ToString('N')
+        'TelegramNewsAI-direct-update-' + [guid]::NewGuid().ToString('N')
     )
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
-    Write-Host 'Распаковываю новый release во временную папку...'
-    Expand-Archive -LiteralPath $zipPath -DestinationPath $tempRoot -Force
+    $manifestPath = Join-Path $tempRoot 'release_manifest.json'
+    Download-RepositoryFile $release.Sha 'release_manifest.json' $manifestPath
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $validated = Assert-DirectUpdateManifest $manifest
 
-    $packageDirs = @(
-        Get-ChildItem -LiteralPath $tempRoot -Directory -Force
-    )
-    if ($packageDirs.Count -ne 1) {
-        throw "Некорректный release ZIP: ожидалась одна корневая папка, найдено $($packageDirs.Count)."
+    foreach ($name in @($validated.ProgramFiles)) {
+        if ($name -ieq 'release_manifest.json') {
+            continue
+        }
+        $destination = Join-Path $tempRoot $name
+        Download-RepositoryFile $release.Sha $name $destination
     }
 
-    $package = $packageDirs[0].FullName
-    $updater = Join-Path $package 'update.ps1'
-    $manifest = Join-Path $package 'release_manifest.json'
-    if (
-        -not (Test-Path -LiteralPath $updater -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $manifest -PathType Leaf)
-    ) {
-        throw 'Некорректный release ZIP: отсутствует штатный updater или release manifest.'
+    $updater = Join-Path $tempRoot 'update.ps1'
+    if (-not (Test-Path -LiteralPath $updater -PathType Leaf)) {
+        throw 'Не удалось подготовить штатный updater.'
     }
 
     Write-Host ''
-    Write-Host 'Запускаю штатное безопасное обновление.'
-    Write-Host 'Если программа сейчас работает, она НЕ будет принудительно закрыта.'
-    Write-Host 'Updater дождётся, когда вы сами закончите текущий запуск, и продолжит автоматически.'
+    Write-Host 'Файлы обновления подготовлены.'
+    Write-Host 'Если программа сейчас работает, текущий запуск и Telegram-соединение не прерываются.'
+    Write-Host 'Updater дождётся обычного завершения программы и продолжит автоматически.'
     Write-Host ''
 
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updater -TargetPath $target -WaitForExit
@@ -268,10 +356,16 @@ try {
         throw "Штатный updater завершился с кодом $LASTEXITCODE."
     }
 
-    Set-InstallRegistration $target
+    $installedVersion = Get-AppVersion $target
     Write-Host ''
-    Write-Host 'Готово. Telegram-сессия, credentials, настройки, каналы, база и история сохранены.'
-    Write-Host 'Повторная авторизация не требуется, если сессия была рабочей до обновления.'
+    Write-Host 'Готово.'
+    if ($installedVersion) {
+        Write-Host "Версия: $installedVersion"
+    }
+    Write-Host 'Программа в актуальном состоянии.'
+    Write-Host 'Telegram-сессия, credentials, настройки, каналы, база и история сохранены.'
+
+    Show-CompletionMessage $installedVersion
 }
 catch {
     Write-Host ''

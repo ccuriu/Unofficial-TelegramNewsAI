@@ -4504,13 +4504,24 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("Resolve-InstallationCandidates", updater)
         self.assertIn("HKCU:\\Software\\Unofficial TelegramNewsAI", updater)
         self.assertIn("FolderBrowserDialog", updater)
-        self.assertIn("OpenFileDialog", updater)
-        self.assertIn("Unofficial-TelegramNewsAI-*-Windows.zip", updater)
         self.assertIn("-WaitForExit", updater)
-        self.assertIn("не будет принудительно закрыта", updater.lower())
+        self.assertIn("текущий запуск и Telegram-соединение не прерываются", updater)
         self.assertIn("update.ps1", updater)
-        self.assertIn("Повторная авторизация не требуется", updater)
+        self.assertIn("Программа в актуальном состоянии", updater)
         self.assertNotIn("Stop-Process", updater)
+
+    def test_portable_standalone_updater_downloads_latest_stable_without_archives(self):
+        updater = (ROOT / "TelegramNewsAI_Update.cmd").read_text(encoding="utf-8")
+        self.assertIn("/releases/latest", updater)
+        self.assertIn("raw.githubusercontent.com", updater)
+        self.assertIn("release_manifest.json", updater)
+        self.assertIn("Assert-DirectUpdateManifest", updater)
+        self.assertIn("Test-ProtectedStateName", updater)
+        self.assertIn("credentials.bin", updater)
+        self.assertIn("telegram_session.session", (ROOT / "update.ps1").read_text(encoding="utf-8-sig"))
+        self.assertNotIn("OpenFileDialog", updater)
+        self.assertNotIn("Expand-Archive", updater)
+        self.assertNotIn(".zip", updater.lower())
 
     def test_release_builder_emits_standalone_updater_outside_zip(self):
         builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
