@@ -44,6 +44,8 @@ Updated: 2026-09-25
 
 **PUBLIC STABLE OPERATION / OBSERVATION**
 
+Public-opening stage: **COMPLETE**. Public positioning now states the intended workflow explicitly: local Telegram collection and history → structured digest → optional user-initiated review or analysis by an external agent/assistant. The application itself has no embedded AI API and performs no automatic external transfer.
+
 The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
 
 The repository is public and the supported `v5.5.0 Stable` binary Release is published. Return to normal Stable operation/observation; do not reopen Telegram/network development without a reproducible defect, recurring usability/quality problem, or safety regression.
@@ -71,7 +73,7 @@ Completed GitHub cleanup:
 - obsolete branches removed; only `main` remains;
 - historical tags `v5.4.1`–`v5.4.10` removed;
 - historical GitHub Releases `v5.4.7`–`v5.4.10` removed;
-- repository description is already neutral and accurate.
+- repository/README positioning is finalized around the actual product purpose: local collection and structured digest preparation for manual review or user-initiated external analysis.
 
 Post-public follow-up:
 - repository visibility: public;
