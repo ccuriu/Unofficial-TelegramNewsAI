@@ -23,10 +23,10 @@ Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
 ## Проверка истории
 
 - [x] История репозитория начинается с отдельного clean-source импорта, а не с локальной рабочей папки.
-- [x] Коммиты вокруг API Hash/session hardening выборочно проверены: отслеживаемых session/credentials/DB не найдено; найденная 32-hex строка — тестовый dummy fixture.
+- [x] Все 130 достижимых коммитов `main` проверены по common-secret/user-data patterns: private keys, GitHub/OpenAI/AWS/Telegram tokens, Telegram API Hash literals, phone literals, Windows user paths и чувствительные локальные файлы.
+- [x] Единственные срабатывания — явные test fixtures (`api_hash = "a" * 32` / dummy 32-hex и фиктивный телефон из одинаковых цифр); реальных credentials/session/DB/телефонов не найдено.
 - [x] Старые конкретные названия публичных каналов в ранней истории не являются credentials; переписывать всю историю только ради них нецелесообразно.
-- [ ] Перед переключением visibility выполнить финальную GitHub secret-scanning/history check доступными средствами аккаунта.
-- [ ] При необходимости удалить старые Actions runs, если в их логах когда-либо использовались реальные локальные значения.
+- [ ] После переключения visibility проверить нативную GitHub Security/secret-scanning поверхность и при любом alert немедленно вернуть репозиторий в private до разбирательства.
 
 ## Public-facing поверхность
 
@@ -39,8 +39,9 @@ Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
 ## GitHub admin cleanup перед Public
 
 - [ ] Удалить или осознанно оставить только нужные ветки. Устаревшие: `ci/continuity-5.5.0-validation`, `experiment/web-preview-collector`, `feature/continuity-context-5.5.0`, `fix/run3-lexical-overmerge`.
-- [ ] Разобраться с историческими tags `v5.4.1`–`v5.4.10`: они не являются текущей 5.5.0 baseline.
-- [ ] Удалить либо явно считать историческими старые GitHub Releases 5.4.x; они не должны выглядеть как рекомендуемая текущая сборка.
+- [ ] Удалить исторические tags `v5.4.1`–`v5.4.10`: они не являются текущей 5.5.0 baseline.
+- [ ] Удалить старые GitHub Releases `v5.4.7`–`v5.4.10`; они не должны выглядеть как рекомендуемая текущая сборка.
+- [ ] На странице About изменить описание на нейтральное публичное и убрать вводящий в заблуждение topic `ai` (встроенного AI API нет).
 - [ ] После cleanup переключить repository visibility private → public.
 - [ ] Сразу после открытия проверить публичную главную страницу, Actions, Releases, Issues и Security/secret scanning.
 
