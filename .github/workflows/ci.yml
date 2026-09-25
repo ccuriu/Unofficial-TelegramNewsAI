@@ -65,6 +65,19 @@ jobs:
           if ($index -lt 0) { throw 'Portable updater payload marker not found.' }
           [void][ScriptBlock]::Create($portable.Substring($index + $marker.Length))
 
+      - name: Run standalone updater self-test
+        shell: powershell
+        run: |
+          $env:TELEGRAMNEWSAI_UPDATER_MODE = '--self-test'
+          $output = & cmd.exe /d /c "echo.|call TelegramNewsAI_Update.cmd" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Standalone updater self-test failed with exit code $LASTEXITCODE."
+          }
+          if (($output -join [Environment]::NewLine) -notmatch 'Standalone updater self-test: OK') {
+            throw 'Standalone updater self-test did not report success.'
+          }
+
       - name: Verify launcher checksum and self-test
         shell: pwsh
         run: |
