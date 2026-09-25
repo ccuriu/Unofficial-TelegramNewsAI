@@ -1,7 +1,8 @@
 ﻿param(
     [Parameter(Position = 0)]
     [string]$TargetPath,
-    [switch]$AllowDowngrade
+    [switch]$AllowDowngrade,
+    [switch]$WaitForExit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,7 @@ $sourceDir = [IO.Path]::GetFullPath(
 ).TrimEnd('\')
 $manifestPath = Join-Path $sourceDir 'release_manifest.json'
 $shortcutName = 'Unofficial TelegramNewsAI.lnk'
+$registryPath = 'HKCU:\Software\Unofficial TelegramNewsAI'
 
 function Get-AppVersion([string]$Root) {
     $collector = Join-Path $Root 'telegram_collector_free.py'
@@ -209,6 +211,18 @@ function Get-Sha256([string]$Path) {
     }
 }
 
+function Set-InstallRegistration([string]$Path) {
+    try {
+        if (-not (Test-Path -LiteralPath $registryPath)) {
+            New-Item -Path $registryPath -Force | Out-Null
+        }
+        Set-ItemProperty -LiteralPath $registryPath -Name InstallPath -Value $Path -Type String
+    }
+    catch {
+        Write-Host 'Предупреждение: не удалось сохранить путь установки в профиле Windows.'
+    }
+}
+
 function Assert-LauncherChecksum {
     $launcher = Join-Path $sourceDir 'Telegram_Digest.exe'
     $checksum = Join-Path $sourceDir 'Telegram_Digest.exe.sha256'
@@ -367,7 +381,18 @@ try {
     Write-Host ''
 
     if (Test-ApplicationRunning $target) {
-        throw 'Закройте Unofficial TelegramNewsAI и повторите обновление.'
+        if (-not $WaitForExit) {
+            throw 'Закройте Unofficial TelegramNewsAI и повторите обновление.'
+        }
+
+        Write-Host 'Unofficial TelegramNewsAI сейчас работает.'
+        Write-Host 'Текущий запуск не прерывается. Завершите работу программы, когда будет удобно.'
+        Write-Host 'Updater продолжит автоматически после её закрытия.'
+        while (Test-ApplicationRunning $target) {
+            Start-Sleep -Seconds 2
+        }
+        Write-Host 'Программа закрыта. Продолжаю обновление.'
+        Write-Host ''
     }
 
     $stateBefore = Get-StateSnapshot $target
@@ -429,6 +454,7 @@ try {
 
         $stateAfter = Get-StateSnapshot $target
         Assert-StateUnchanged $stateBefore $stateAfter
+        Set-InstallRegistration $target
 
         Write-Host ''
         Write-Host 'Обновление завершено.'
