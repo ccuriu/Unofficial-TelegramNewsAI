@@ -28,7 +28,7 @@ Updated: 2026-09-25
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
 - Telegram session, credentials, settings, selected channels, database and digest history preserved
-- Pre-public documentation / branding / repository hygiene: pending PR CI
+- Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
 
 ## Current phase
 
