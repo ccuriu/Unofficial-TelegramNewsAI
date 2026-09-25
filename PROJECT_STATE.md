@@ -39,6 +39,7 @@ Updated: 2026-09-25
 - Direct-updater `main` after merge: PASS (CI #275, 202 tests)
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 - Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
+- User-facing onboarding documentation: PASS (README quick-start diagram + `docs/INSTALLATION.md` first-run guide)
 
 ## Current phase
 
@@ -74,6 +75,7 @@ Completed GitHub cleanup:
 - historical tags `v5.4.1`–`v5.4.10` removed;
 - historical GitHub Releases `v5.4.7`–`v5.4.10` removed;
 - repository/README positioning is finalized around the actual product purpose: local collection and structured digest preparation for manual review or user-initiated external analysis.
+- README now includes a concise visual quick start and links to a dedicated browser-based installation/first-run guide.
 
 Post-public follow-up:
 - repository visibility: public;
