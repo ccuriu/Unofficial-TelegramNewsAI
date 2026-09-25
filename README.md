@@ -21,6 +21,21 @@
 
 **Программа сама не отправляет содержимое Telegram во внешние AI/ML-сервисы.** TelegramNewsAI не содержит встроенного AI API, облачного сервера или фоновой передачи экспортов. Пользователь сам решает, просматривать дайджест вручную или передавать его выбранному внешнему инструменту. Историческое имя файла `ДАЙДЖЕСТ_ДЛЯ_ИИ.md` сохранено для совместимости и не означает автоматической передачи данных.
 
+## Быстрый старт
+
+<p align="center">
+  <img src="assets/quick-start.svg" alt="Unofficial TelegramNewsAI — быстрый старт" width="900">
+</p>
+
+1. Скачайте ZIP из **[последнего Stable Release](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/latest)**.
+2. Полностью распакуйте архив в постоянную папку и запустите `INSTALL.bat`.
+3. При первом входе используйте собственные Telegram API ID и API Hash с [my.telegram.org](https://my.telegram.org).
+4. Для первого теста выберите 5–10 нужных каналов.
+5. Нажмите Enter или `D`, оставьте период 24 часа и дождитесь завершения. Проводник автоматически откроет папку и выделит `ДАЙДЖЕСТ_ДЛЯ_ИИ.md`.
+
+> [!TIP]
+> **Нужна пошаговая инструкция?** Откройте **[установку и первый запуск](docs/INSTALLATION.md)** или **[PDF-памятку](docs/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf)**.
+
 ## Возможности
 
 - последовательная синхронизация выбранных каналов через Telethon / MTProto;
@@ -42,16 +57,16 @@
 
 ## Установка
 
-Для обычного пользователя рекомендуется готовый **[v5.5.0 Stable Release](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/tag/v5.5.0)**.
+Для обычного пользователя используйте **[последний Stable Release](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/latest)**.
 
-1. Скачайте `Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.zip`.
-2. При желании сверьте SHA-256 с файлом `Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.sha256.txt`.
-3. Распакуйте ZIP в обычную пользовательскую папку.
-4. Запустите `INSTALL.bat`.
-5. При первом подключении введите собственные Telegram API ID и API Hash.
-6. После установки запускайте программу ярлыком **Unofficial TelegramNewsAI** или `Telegram_Digest.exe`.
+Коротко: скачайте `Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.zip` → распакуйте его в постоянную папку → запустите `INSTALL.bat` → после установки запускайте программу ярлыком **Unofficial TelegramNewsAI**.
 
-Поддерживаются Windows 10/11 и Python 3.10+. Установщик создаёт изолированное `.venv`.
+Подробности, первый вход в Telegram, выбор каналов и создание первого дайджеста:
+
+- **[Пошаговая инструкция в браузере](docs/INSTALLATION.md)**
+- **[PDF-памятка для скачивания](docs/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf)**
+
+Поддерживаются Windows 10/11 и Python 3.10+. Установщик создаёт изолированное `.venv`; если подходящего Python нет, он может установить Python 3.13 через Windows Package Manager.
 
 Для разработки или проверки исходников можно скачать snapshot ветки `main`; готовый Release и исходный репозиторий соответствуют одной линии **5.5.0 Stable**. Исторические 5.4.x tags/Releases удалены, чтобы устаревшие сборки не выглядели как текущие.
 
