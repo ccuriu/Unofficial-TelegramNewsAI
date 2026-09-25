@@ -1,90 +1,60 @@
-# Чек-лист первого Stable-релиза
+# Pre-public checklist — Unofficial TelegramNewsAI
 
-Статус: **IN PROGRESS**. Этот файл определяет готовность первого Stable-релиза. Публичность или приватность репозитория — отдельное продуктовое решение и не требует испытаний выше поддерживаемого масштаба.
+Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
 
-## 1. Telegram API / поддерживаемый масштаб
+Этот файл относится к открытию исходного GitHub-репозитория. Публичный бинарный Release/tag — отдельное решение. Актуальный технический статус всегда берётся из `PROJECT_STATE.md`.
 
-- [x] Защитная остановка при FloodWait/PEER_FLOOD/потере или отзыве сессии покрыта offline regression tests.
-- [x] Обычный дайджест сначала использует локальный entity-cache и не вызывает полный `get_dialogs(limit=None)` без необходимости.
-- [x] Скрытая повторная авторизация запрещена; явная команда `T` восстанавливает только Telegram-сессию.
-- [x] Одновременный обычный запуск двух копий блокируется named mutex.
-- [x] Продуктовый максимум первого Stable установлен в **50 выбранных каналов/источников**.
-- [x] Код не содержит отдельного эксплуатационного режима для 60/75/100+ каналов и блокирует сетевой этап при списке больше 50.
-- [x] README и план испытаний ясно отличают «поддерживается/тестируется максимум 50» от несуществующей гарантии Telegram API.
-- [x] Штатный inter-channel default увеличен до 1,0 с без anti-detection jitter.
-- [x] Обычный sync пишет локальный `API_SAFETY_SUMMARY`; логические history-итераторы не выдаются за точное число MTProto requests.
-- [ ] На реальной рабочей установке сформирован список из 50 реально нужных источников.
-- [ ] Выполнены минимум 3 штатных 24-часовых прогона на полном списке из 50 без FloodWait, PEER_FLOOD, защитной остановки, повторной авторизации или изменения состояния аккаунта.
-- [ ] После реальных прогонов зафиксирована финальная приёмка сетевого режима 50.
+## Уже принято
 
-Испытания 60 → 75 → 100 каналов **не являются условием Stable**. 7/30/90-дневные периоды также не образуют обязательную лестницу API-нагрузки; они проверяются функционально по необходимости.
+- [x] 5.5.0 Stable принят как рабочая baseline.
+- [x] Максимум 50 выбранных источников закреплён до сетевого этапа.
+- [x] Реальный 50-source safety gate пройден без FloodWait, повторной авторизации и потери сессии.
+- [x] SQLite quick_check = ok.
+- [x] Export schema 8 и digest profile 9.1 приняты regression-тестами.
+- [x] Установка, clean install и in-place update проверены Windows CI.
+- [x] Updater сохраняет session/credentials/settings/channels/database/history.
+- [x] Пользовательское название: **Unofficial TelegramNewsAI**.
+- [x] Иконка проекта оригинальная и не копирует официальный логотип Telegram.
+- [x] Release builder использует имя `Unofficial-TelegramNewsAI-...`.
+- [x] Программа не содержит встроенного AI API и не отправляет Telegram-контент во внешние AI/ML-сервисы автоматически.
+- [x] Текущий `main` и CI не отслеживают session/credentials/db/settings/logs/дайджесты.
+- [x] Старые 5.4.7 screenshots проверены на отсутствие секретов и удаляются как устаревшие.
 
-## 2. Сессия и авторизация
+## Проверка истории
 
-- [x] Существующая установка не начинает новую авторизацию автоматически, если пропал `telegram_session.session`.
-- [x] Если сохранённая сессия перестала быть авторизованной, программа останавливается вместо скрытого запроса нового кода.
-- [x] Команда `T` после подтверждения пересоздаёт только Telegram-сессию, не удаляя credentials, базу и список каналов.
-- [x] Любой FloodWait виден приложению и прекращает текущий сетевой этап.
-- [x] Ошибки, похожие на ограничение/отзыв сессии, не ретраятся вслепую.
+- [x] История репозитория начинается с отдельного clean-source импорта, а не с локальной рабочей папки.
+- [x] Коммиты вокруг API Hash/session hardening выборочно проверены: отслеживаемых session/credentials/DB не найдено; найденная 32-hex строка — тестовый dummy fixture.
+- [x] Старые конкретные названия публичных каналов в ранней истории не являются credentials; переписывать всю историю только ради них нецелесообразно.
+- [ ] Перед переключением visibility выполнить финальную GitHub secret-scanning/history check доступными средствами аккаунта.
+- [ ] При необходимости удалить старые Actions runs, если в их логах когда-либо использовались реальные локальные значения.
 
-## 3. Контент, языки и AI/ML
+## Public-facing поверхность
 
-- [x] Программа сама не отправляет экспорт во внешний AI/ML-сервис.
-- [x] ML/embedding-поиск по собранному Telegram-контенту отключён.
-- [x] Локальный поиск работает без модели через SQLite FTS5/LIKE.
-- [x] Unicode и английский текст покрыты offline-проверкой пути нормализация → SQLite → поиск/JSON.
-- [x] `recommended_digest_request` требует итог на языке запроса пользователя, а при неуказанном/неясном языке — на русском.
-- [x] `recommended_digest_request` требует переводить иноязычные фрагменты по смыслу с сохранением имён, чисел, фактов и оригинальных ссылок.
-- [x] Язык источника сам по себе не должен разделять публикации одного события в итоговом ИИ-дайджесте.
-- [x] Документация явно фиксирует, что FTS5/LIKE и `continuity_context` сами машинный перевод не выполняют.
-- [ ] На реальном 50-канальном наборе с русскими, украинскими и несколькими английскими источниками проверено качество итогового смешанного дайджеста.
-- [ ] Если реальная проверка не показывает заметной потери качества, встроенный перевод/embeddings перед Stable не добавляются.
+- [x] README описывает локальную утилиту и не обещает автоматический AI-сервис.
+- [x] README/SECURITY отделяют публикацию исходников от публичного бинарного Release.
+- [x] Пользовательское название и имя репозитория используют **Unofficial TelegramNewsAI** / `Unofficial-TelegramNewsAI`.
+- [x] Telegram Terms / Content Licensing / Sponsored Messages указаны как внешние правила без заявления о специальном исключении.
+- [x] Issue templates предупреждают не публиковать секреты и локальные данные.
 
-## 4. Данные и событийный контекст
+## GitHub admin cleanup перед Public
 
-- [x] Schema 8 сохраняет содержательные сообщения, ссылки, previous_versions и related_message_groups без подтверждённой потери информации.
-- [x] Bounded `continuity_context` не выполняет дополнительных Telegram-запросов и отделён от текущего периода.
-- [x] После реальной приёмки ложные self-link/слишком широкие lexical continuity связи получили точечные регрессии.
-- [ ] На финальных 50-канальных JSON нет новой подтверждённой регрессии `continuity_context` или качества экспорта.
+- [ ] Удалить или осознанно оставить только нужные ветки. Устаревшие: `ci/continuity-5.5.0-validation`, `experiment/web-preview-collector`, `feature/continuity-context-5.5.0`, `fix/run3-lexical-overmerge`.
+- [ ] Разобраться с историческими tags `v5.4.1`–`v5.4.10`: они не являются текущей 5.5.0 baseline.
+- [ ] Удалить либо явно считать историческими старые GitHub Releases 5.4.x; они не должны выглядеть как рекомендуемая текущая сборка.
+- [ ] После cleanup переключить repository visibility private → public.
+- [ ] Сразу после открытия проверить публичную главную страницу, Actions, Releases, Issues и Security/secret scanning.
 
-## 5. Название и публичное распространение
+## Что НЕ требуется перед открытием исходников
 
-- [x] Пользовательское название сборки: **Unofficial TelegramNewsAI**.
-- [x] Release launcher использует оригинальный проектный значок, не копирующий официальный логотип Telegram.
-- [x] Release ZIP называется `Unofficial-TelegramNewsAI-...`.
-- [ ] Если репозиторий решено открыть публично, финально проверены README, скриншоты, Releases и описание репозитория на отсутствие впечатления официального продукта Telegram.
+- дополнительные нагрузочные тесты 60/75/100 источников;
+- новый Telegram transport;
+- embeddings/ML;
+- сервер, Docker или облачная инфраструктура;
+- новый публичный бинарный Release только ради смены visibility.
 
-### Public distribution / Terms / Sponsored Messages
+## Официальные ссылки
 
-- [x] Для **локального личного Stable** вопрос Sponsored Messages не считается автоматическим блокером технической приёмки.
-- [x] Зафиксировано, что программа не предоставляет штатный интерфейс чтения Telegram-ленты и не запрашивает отдельный поток Sponsored Messages.
-- [ ] **До публичного распространения** отдельно закрыта применимость Telegram API Terms 1.5 к текущей архитектуре.
-- [ ] **До публичного распространения** отдельно закрыта применимость Content Licensing / AI Scraping Terms к collector → local archive → JSON → user-selected AI workflow.
-- [ ] **До публичного распространения** отдельно закрыта применимость требования official Sponsored Messages к текущей пакетной архитектуре.
-- [x] Никакого категорического вывода «точно нарушает» / «точно соответствует» без отдельного анализа не зафиксировано.
-
-## 6. Release / CI
-
-- [x] Offline regression suite, Python compile/import, PowerShell syntax и launcher self-test входят в CI.
-- [x] Release ZIP проверяется против whitelist `release_manifest.json` и не включает пользовательские session/credentials/db/settings/logs/дайджесты.
-- [x] Clean install и in-place update уже покрыты реальной Windows CI-проверкой с сохранением пользовательского состояния.
-- [x] Базовый кандидат до MTProto-hardening прошёл полный CI: 154 offline regression tests, сборку release-кандидата, clean install и in-place update.
-- [x] MTProto-hardening кандидат прошёл полный CI: **161 offline regression tests**, compile/import, проверку launcher, clean install, in-place update, точный состав release ZIP и загрузку verified artifact.
-- [ ] На рабочем компьютере после обновления выполнен smoke-цикл `запуск → 24-часовой дайджест → тематический поиск`.
-- [ ] Финальный ZIP и SHA-256 подготовлены.
-- [ ] Версия помечена Stable только после реальных прогонов на 50 и финальной приёмки.
-
-## Официальные источники
-
-- https://core.telegram.org/api/obtaining_api_id
 - https://core.telegram.org/api/terms
 - https://telegram.org/tos/content-licensing
-- https://core.telegram.org/api/errors
-- https://core.telegram.org/api/errors.json
-- https://core.telegram.org/api/auth
-- https://core.telegram.org/method/messages.getHistory
-- https://core.telegram.org/constructor/message
 - https://core.telegram.org/api/sponsored-messages
-- https://docs.telethon.dev/en/stable/modules/client.html
-- https://docs.telethon.dev/en/stable/concepts/entities.html
-- https://docs.telethon.dev/en/stable/modules/sessions.html
+- https://core.telegram.org/api/obtaining_api_id

@@ -1,6 +1,8 @@
 # Telegram API / Terms research record — 2026-09-22
 
-Status: **technical record for pre-Stable hardening; not a legal conclusion**
+Status: **historical technical record; not a legal conclusion**
+
+> Update 2026-09-25: 5.5.0 Stable и сетевой профиль до 50 источников уже приняты. Этот файл сохраняется как инженерная история исследования условий платформы. Открытие исходного репозитория само по себе не меняет runtime-поведение программы и рассматривается отдельно от нового публичного бинарного Release/hosted-сервиса. Текущее public-facing описание фактического поведения находится в `README.md` и `SECURITY.md`; данный документ не заявляет ни универсального разрешения, ни специального исключения из правил Telegram.
 
 This document records the engineering conclusions accepted for the first Stable candidate after reviewing the current Telegram API Terms, Content Licensing / AI Scraping Terms, RPC error documentation, authorization documentation, `messages.getHistory`, the Telegram `message` constructor and Telethon documentation.
 
