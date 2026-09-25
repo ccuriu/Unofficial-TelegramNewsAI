@@ -40,6 +40,7 @@ Updated: 2026-09-25
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 - Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
 - User-facing onboarding documentation: PASS (README quick-start diagram + `docs/INSTALLATION.md` first-run guide)
+- Public v5.5.0 quick-start PDF: PASS (`Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf`, Release asset SHA-256 `4d494fd4ec4d5f13607c24135f8868ce2dc7d089dce20b03bc647708c9a010dc`); first-login wording explicitly uses right-click paste behavior and a country-neutral international phone-number format
 
 ## Current phase
 
