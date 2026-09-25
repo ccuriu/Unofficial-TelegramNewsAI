@@ -5,7 +5,8 @@ Updated: 2026-09-25
 ## Accepted baseline
 
 - Release: `5.5.0 Stable`
-- Stable release commit: `c21fe3c8a7c2ac2ea9fe416f8fd5c0f1e43b89c9`
+- Initial Stable acceptance commit: `c21fe3c8a7c2ac2ea9fe416f8fd5c0f1e43b89c9`
+- Public `v5.5.0` release tag / verified CI artifact commit: `fc7f03c7f288172c6e2a9631a7ef53019798b1ae`
 - Export schema: `8`
 - Digest profile: `9.1`
 - Maximum selected sources: `50`
@@ -30,7 +31,8 @@ Updated: 2026-09-25
 - Telegram session, credentials, settings, selected channels, database and digest history preserved
 - Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
 - Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
-- Current pre-public `main`: PASS (CI #261, 201 tests)
+- Pre-public accepted `main`: PASS (CI #261, 201 tests)
+- Current public `main`: PASS (CI #271, 201 tests)
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 - Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
 
