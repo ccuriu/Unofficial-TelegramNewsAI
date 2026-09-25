@@ -25,6 +25,8 @@ Updated: 2026-09-25
 - Profile 9.1 scoped-request direct source-link regression: PASS (CI #247, 197 tests)
 - Locked AI-export replacement fallback: PASS (CI #243, 197 tests)
 - Portable standalone updater / no forced active-session shutdown: PASS (CI #251, 201 tests)
+- Direct Stable updater without release ZIP download: PASS (PR #54; CI #274/#275, 202 tests)
+- Public `v5.5.0` standalone updater asset refreshed from verified CI #275; SHA-256 `e8b77e2eed15a1fe6c6dd0b623702d766a14cb46c5e298c42f0b5a16aac28eeb`
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
@@ -32,7 +34,7 @@ Updated: 2026-09-25
 - Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
 - Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
 - Pre-public accepted `main`: PASS (CI #261, 201 tests)
-- Current public `main`: PASS (CI #271, 201 tests)
+- Direct-updater `main` after merge: PASS (CI #275, 202 tests)
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 - Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
 

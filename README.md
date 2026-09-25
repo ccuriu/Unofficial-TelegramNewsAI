@@ -59,7 +59,7 @@
 
 ## Обновление
 
-Для обновления достаточно одного переносимого файла `TelegramNewsAI_Update.cmd`. Его можно скачать в любую папку и запустить двойным щелчком.
+Для обновления достаточно одного переносимого файла [`TelegramNewsAI_Update.cmd`](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/latest/download/TelegramNewsAI_Update.cmd). Его можно скачать в любую папку и запустить двойным щелчком. ZIP для обновления не нужен.
 
 Updater:
 - автоматически ищет установленный Unofficial TelegramNewsAI по сохранённому пути и ярлыкам Windows;
