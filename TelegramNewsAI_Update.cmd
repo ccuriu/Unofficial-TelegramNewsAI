@@ -213,7 +213,7 @@ function Set-InstallRegistration([string]$Path) {
         if (-not (Test-Path -LiteralPath $registryPath)) {
             New-Item -Path $registryPath -Force | Out-Null
         }
-        Set-ItemProperty -LiteralPath $registryPath -Name InstallPath -Value $Path -Type String
+        New-ItemProperty -Path $registryPath -Name InstallPath -Value $Path -PropertyType String -Force | Out-Null
     }
     catch {
         Write-Host 'Предупреждение: не удалось сохранить путь установки в профиле Windows.'
