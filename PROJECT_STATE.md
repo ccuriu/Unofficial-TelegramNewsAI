@@ -25,8 +25,10 @@ Updated: 2026-09-25
 - Profile 9.1 scoped-request direct source-link regression: PASS (CI #247, 197 tests)
 - Locked AI-export replacement fallback: PASS (CI #243, 197 tests)
 - Portable standalone updater / no forced active-session shutdown: PASS (CI #251, 201 tests)
-- Direct Stable updater without release ZIP download: PASS (PR #54; CI #274/#275, 202 tests)
-- Public `v5.5.0` standalone updater asset refreshed from verified CI #275; SHA-256 `e8b77e2eed15a1fe6c6dd0b623702d766a14cb46c5e298c42f0b5a16aac28eeb`
+- Direct Stable updater without release ZIP download: PASS (PR #54; runtime path-normalization defect fixed in PR #59)
+- Standalone updater Windows runtime self-test: PASS (CI #286/#288, 202 tests)
+- Public `v5.5.0` standalone updater asset refreshed from verified CI #286; SHA-256 `bccb0aeb6cbc7183602b2e74c1b8fd0d58e4242a23ce4fa5ee184743be1d30d8`
+- Live public-updater smoke on the actual installed Windows copy: PASS; install auto-detected; no ZIP path; protected session/credentials/settings/channels/database files unchanged byte-for-byte
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
