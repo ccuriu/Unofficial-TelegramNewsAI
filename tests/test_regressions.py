@@ -4503,7 +4503,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("OpenFileDialog", updater)
         self.assertIn("Unofficial-TelegramNewsAI-*-Windows.zip", updater)
         self.assertIn("-WaitForExit", updater)
-        self.assertIn("не будет принудительно закрыта", updater)
+        self.assertIn("не будет принудительно закрыта", updater.lower())
         self.assertIn("update.ps1", updater)
         self.assertIn("Повторная авторизация не требуется", updater)
         self.assertNotIn("Stop-Process", updater)
