@@ -4508,6 +4508,9 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("текущий запуск и Telegram-соединение не прерываются", updater)
         self.assertIn("update.ps1", updater)
         self.assertIn("Программа в актуальном состоянии", updater)
+        self.assertIn("TELEGRAMNEWSAI_UPDATER_MODE", updater)
+        self.assertIn("--self-test", updater)
+        self.assertIn("$RelativePath.Replace", updater)
         self.assertNotIn("Stop-Process", updater)
 
     def test_portable_standalone_updater_downloads_latest_stable_without_archives(self):
