@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="230" viewBox="0 0 1120 230" role="img" aria-labelledby="title desc">
+  <title id="title">Unofficial TelegramNewsAI — быстрый старт</title>
+  <desc id="desc">Скачать Stable Release, распаковать, установить, выбрать каналы и получить дайджест</desc>
+  <rect width="1120" height="230" rx="18" fill="#f7f9fc"/>
+  <text x="40" y="43" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="700" fill="#1f2f46">Быстрый старт</text>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(40 75)">
+      <rect width="188" height="112" rx="12" fill="#ffffff" stroke="#9fb2ca" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#2f6feb"/><text x="28" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">1</text>
+      <text x="18" y="65" font-size="18" font-weight="700" fill="#23354d">Скачать Release</text>
+      <text x="18" y="91" font-size="15" fill="#52677f">Stable ZIP с GitHub</text>
+    </g>
+    <path d="M240 131 H266" stroke="#2f6feb" stroke-width="5" stroke-linecap="round"/><path d="M257 122 L268 131 L257 140" fill="none" stroke="#2f6feb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(280 75)">
+      <rect width="188" height="112" rx="12" fill="#ffffff" stroke="#9fb2ca" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#2f6feb"/><text x="28" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">2</text>
+      <text x="18" y="65" font-size="18" font-weight="700" fill="#23354d">Распаковать</text>
+      <text x="18" y="91" font-size="15" fill="#52677f">в постоянную папку</text>
+    </g>
+    <path d="M480 131 H506" stroke="#2f6feb" stroke-width="5" stroke-linecap="round"/><path d="M497 122 L508 131 L497 140" fill="none" stroke="#2f6feb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(520 75)">
+      <rect width="188" height="112" rx="12" fill="#ffffff" stroke="#9fb2ca" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#2f6feb"/><text x="28" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">3</text>
+      <text x="18" y="65" font-size="18" font-weight="700" fill="#23354d">INSTALL.bat</text>
+      <text x="18" y="91" font-size="15" fill="#52677f">дождаться установки</text>
+    </g>
+    <path d="M720 131 H746" stroke="#2f6feb" stroke-width="5" stroke-linecap="round"/><path d="M737 122 L748 131 L737 140" fill="none" stroke="#2f6feb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(760 75)">
+      <rect width="150" height="112" rx="12" fill="#ffffff" stroke="#9fb2ca" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#2f6feb"/><text x="28" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">4</text>
+      <text x="18" y="65" font-size="18" font-weight="700" fill="#23354d">Каналы</text>
+      <text x="18" y="91" font-size="15" fill="#52677f">5–10 для теста</text>
+    </g>
+    <path d="M922 131 H948" stroke="#2f6feb" stroke-width="5" stroke-linecap="round"/><path d="M939 122 L950 131 L939 140" fill="none" stroke="#2f6feb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(962 75)">
+      <rect width="118" height="112" rx="12" fill="#effaf3" stroke="#6fb98a" stroke-width="2"/>
+      <circle cx="28" cy="28" r="16" fill="#248a4b"/><text x="28" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">5</text>
+      <text x="18" y="65" font-size="18" font-weight="700" fill="#1f6238">Дайджест</text>
+      <text x="18" y="91" font-size="15" fill="#47725a">готов</text>
+    </g>
+  </g>
+</svg>
