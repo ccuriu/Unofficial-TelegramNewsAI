@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf'
+      - 'tools/build_quick_start_pdf.py'
       - '.github/workflows/publish_v550_quick_start_pdf.yml'
 
 permissions:
@@ -17,8 +17,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build PDF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+          python -m pip install --disable-pip-version-check reportlab
+          python tools/build_quick_start_pdf.py
+
       - name: Publish PDF to v5.5.0 Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload v5.5.0 docs/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf --clobber
+          gh release upload v5.5.0 Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf --clobber
