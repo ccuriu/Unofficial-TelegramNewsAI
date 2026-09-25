@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 set "TELEGRAMNEWSAI_UPDATER_SELF=%~f0"
+set "TELEGRAMNEWSAI_UPDATER_MODE=%~1"
 title Обновление Unofficial TelegramNewsAI
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$self=$env:TELEGRAMNEWSAI_UPDATER_SELF; $raw=[IO.File]::ReadAllText($self,[Text.Encoding]::UTF8); $marker=':__POWERSHELL_PAYLOAD__'; $index=$raw.LastIndexOf($marker,[StringComparison]::Ordinal); if($index -lt 0){Write-Error 'Updater payload not found.'; exit 2}; $script=$raw.Substring($index+$marker.Length); & ([ScriptBlock]::Create($script))"
@@ -212,7 +213,7 @@ function Test-ProtectedStateName([string]$Name) {
 
 function Get-RawRepositoryUrl([string]$CommitSha, [string]$RelativePath) {
     Assert-RelativeProgramPath $RelativePath
-    $normalized = $RelativePath -replace '\', '/'
+    $normalized = $RelativePath.Replace('\', '/')
     $safePath = (($normalized.Split('/') | ForEach-Object {
         [Uri]::EscapeDataString($_)
     }) -join '/')
@@ -310,6 +311,23 @@ function Show-CompletionMessage([string]$Version) {
     }
     catch {
     }
+}
+
+if ([string]$env:TELEGRAMNEWSAI_UPDATER_MODE -ieq '--self-test') {
+    $probeSha = 'a' * 40
+    $probe = Get-RawRepositoryUrl $probeSha 'nested\file.txt'
+    $expected = "https://raw.githubusercontent.com/$repository/$probeSha/nested/file.txt"
+    if ($probe -cne $expected) {
+        throw "Standalone updater URL normalization failed: $probe"
+    }
+    if (-not (Test-ProtectedStateName 'nested\credentials.bin')) {
+        throw 'Standalone updater protected-state check failed.'
+    }
+    if (Test-ProtectedStateName 'README.md') {
+        throw 'Standalone updater marked a program file as protected state.'
+    }
+    Write-Host 'Standalone updater self-test: OK'
+    exit 0
 }
 
 $tempRoot = $null
