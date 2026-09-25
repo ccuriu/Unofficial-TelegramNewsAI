@@ -1,0 +1,61 @@
+name: Publish direct updater asset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-direct-updater.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate direct updater
+        shell: powershell
+        run: |
+          $path = '.\TelegramNewsAI_Update.cmd'
+          $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+
+          foreach ($required in @(
+            '/releases/latest',
+            'raw.githubusercontent.com',
+            'release_manifest.json',
+            'Assert-DirectUpdateManifest',
+            'Программа в актуальном состоянии'
+          )) {
+            if ($text.IndexOf($required, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+              throw "Direct updater marker missing: $required"
+            }
+          }
+
+          foreach ($forbidden in @('Expand-Archive', 'OpenFileDialog', '.zip')) {
+            if ($text.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+              throw "Obsolete ZIP updater marker found: $forbidden"
+            }
+          }
+
+      - name: Replace v5.5.0 updater asset
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v5.5.0 .\TelegramNewsAI_Update.cmd --clobber --repo $env:GITHUB_REPOSITORY
+
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v5.5.0"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read v5.5.0 release after upload.' }
+          $release = $releaseJson | ConvertFrom-Json
+          $asset = @($release.assets | Where-Object { $_.name -eq 'TelegramNewsAI_Update.cmd' })
+          if ($asset.Count -ne 1) { throw "Expected one updater asset, found $($asset.Count)." }
+
+          $expected = 'sha256:' + (Get-FileHash -LiteralPath '.\TelegramNewsAI_Update.cmd' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ([string]$asset[0].digest -ine $expected) {
+            throw "Published updater digest mismatch: $($asset[0].digest) != $expected"
+          }
+
+          Write-Host "Published updater: $($asset[0].size) bytes, $expected"
