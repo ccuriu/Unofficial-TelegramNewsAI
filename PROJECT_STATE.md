@@ -29,6 +29,8 @@ Updated: 2026-09-25
 - Local Stable installation/update: PASS
 - Telegram session, credentials, settings, selected channels, database and digest history preserved
 - Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
+- Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
+- Current pre-public `main`: PASS (CI #261, 201 tests)
 
 ## Current phase
 
@@ -36,7 +38,7 @@ Updated: 2026-09-25
 
 The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
 
-Current work is limited to public-facing documentation and GitHub repository hygiene: remove obsolete screenshots/branches/releases, verify history for secrets, align naming with `Unofficial TelegramNewsAI`, and then change repository visibility.
+Current work is limited to GitHub administration: remove obsolete branches/tags/releases, adjust public repository metadata, then change repository visibility. The source/documentation/history gates are already accepted.
 
 Public source-code visibility and a new public binary Release/tag are separate decisions. Opening the source repository does not require another 50-source load test.
 
@@ -51,11 +53,17 @@ Historical testing plans and completed specialist chats do not override current 
 
 ## Public repository gate
 
-Before visibility changes to public:
-- current main CI must be green;
-- no local user data or credentials may be tracked;
-- old public-facing screenshots must not misrepresent the current version;
-- historical branches/releases/tags require an explicit keep/delete decision;
-- perform the final GitHub secret/history check available to the account.
+Completed before visibility changes:
+- current main CI is green (CI #261, 201 tests);
+- local user data / credentials are not tracked;
+- obsolete public-facing screenshots were removed;
+- all 130 reachable commits were scanned for common secret/user-data patterns; only explicit dummy test fixtures matched.
+
+Remaining GitHub-admin steps:
+- delete the four obsolete branches listed in `docs/PUBLIC_RELEASE_CHECKLIST.md`;
+- delete or deliberately retain historical 5.4.x tags/releases; current decision is to remove them so they cannot look like supported builds;
+- update repository description/topics for the public page;
+- switch visibility private → public;
+- immediately check the public Security/secret-scanning surface and the visible Releases/Branches page.
 
 Telegram API Terms, Content Licensing and Sponsored Messages remain external platform rules. The project documentation describes actual local behavior and does not claim a special exemption.
