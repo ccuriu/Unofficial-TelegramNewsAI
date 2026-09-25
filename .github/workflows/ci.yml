@@ -68,7 +68,8 @@ jobs:
       - name: Run standalone updater self-test
         shell: powershell
         run: |
-          $output = & cmd.exe /d /c "echo.|call TelegramNewsAI_Update.cmd --self-test" 2>&1
+          $env:TELEGRAMNEWSAI_UPDATER_MODE = '--self-test'
+          $output = & cmd.exe /d /c "echo.|call TelegramNewsAI_Update.cmd" 2>&1
           $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) {
             throw "Standalone updater self-test failed with exit code $LASTEXITCODE."
