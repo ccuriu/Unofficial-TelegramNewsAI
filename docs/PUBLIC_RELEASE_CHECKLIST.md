@@ -1,6 +1,6 @@
 # Pre-public checklist — Unofficial TelegramNewsAI
 
-Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
+Status: **PUBLIC RELEASE COMPLETED**.
 
 Этот файл относится к открытию исходного GitHub-репозитория. Публичный бинарный Release/tag — отдельное решение. Актуальный технический статус всегда берётся из `PROJECT_STATE.md`.
 
@@ -40,11 +40,13 @@ Status: **PRE-PUBLIC REPOSITORY PREPARATION**.
 
 - [x] Удалены устаревшие ветки; в репозитории остался только `main`.
 - [x] Удалены исторические tags `v5.4.1`–`v5.4.10`.
-- [x] Удалены старые GitHub Releases `v5.4.7`–`v5.4.10`; текущего публичного бинарного Release пока нет.
+- [x] Удалены старые GitHub Releases `v5.4.7`–`v5.4.10`.
+- [x] Опубликован текущий `v5.5.0 Stable` с ZIP, SHA-256 и отдельным `TelegramNewsAI_Update.cmd`.
 - [x] Описание репозитория уже нейтральное и соответствует локальной функции программы.
 - [ ] Убрать вводящий в заблуждение topic `ai` (встроенного AI API нет).
-- [ ] После cleanup переключить repository visibility private → public.
-- [ ] Сразу после открытия проверить публичную главную страницу, Actions, Releases, Issues и Security/secret scanning.
+- [x] Repository visibility переключена private → public.
+- [x] Публичная главная страница, Actions, Releases и Issues проверены после открытия.
+- [ ] GitHub Security/secret scanning продолжать наблюдать; при alert немедленно разбирать причину.
 
 ## Что НЕ требуется перед открытием исходников
 
