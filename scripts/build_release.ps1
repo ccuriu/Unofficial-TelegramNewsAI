@@ -16,6 +16,20 @@ if (@($programFiles | Select-Object -Unique).Count -ne $programFiles.Count) {
     throw 'Release manifest contains duplicate ProgramFiles.'
 }
 
+$standaloneUpdaterName = [string]$manifest.StandaloneUpdater
+if (
+    [string]::IsNullOrWhiteSpace($standaloneUpdaterName) -or
+    [IO.Path]::IsPathRooted($standaloneUpdaterName) -or
+    $standaloneUpdaterName -match '(^|[\\/])\.\.([\\/]|$)' -or
+    [IO.Path]::GetFileName($standaloneUpdaterName) -ne $standaloneUpdaterName
+) {
+    throw 'Release manifest has an invalid StandaloneUpdater.'
+}
+$standaloneUpdaterSource = Join-Path $root $standaloneUpdaterName
+if (-not (Test-Path -LiteralPath $standaloneUpdaterSource -PathType Leaf)) {
+    throw "Standalone updater not found: $standaloneUpdaterName"
+}
+
 $versionMatch = Select-String -LiteralPath (Join-Path $root 'telegram_collector_free.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"'
 if (-not $versionMatch) { throw 'Could not determine APP_VERSION.' }
 $versionRaw = $versionMatch.Matches[0].Groups[1].Value
@@ -25,9 +39,10 @@ $packageName = "Unofficial-TelegramNewsAI-$version-$channel-Windows"
 $package = [IO.Path]::GetFullPath((Join-Path $output $packageName))
 $zip = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.zip')))
 $zipChecksum = [IO.Path]::GetFullPath((Join-Path $output ($packageName + '.sha256.txt')))
+$standaloneUpdater = [IO.Path]::GetFullPath((Join-Path $output $standaloneUpdaterName))
 $outputPrefix = $output + [IO.Path]::DirectorySeparatorChar
 
-foreach ($target in @($package, $zip, $zipChecksum)) {
+foreach ($target in @($package, $zip, $zipChecksum, $standaloneUpdater)) {
     if (-not $target.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Unsafe release output path: $target"
     }
@@ -36,6 +51,7 @@ foreach ($target in @($package, $zip, $zipChecksum)) {
 if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Recurse -Force }
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 if (Test-Path -LiteralPath $zipChecksum) { Remove-Item -LiteralPath $zipChecksum -Force }
+if (Test-Path -LiteralPath $standaloneUpdater) { Remove-Item -LiteralPath $standaloneUpdater -Force }
 New-Item -ItemType Directory -Path $package -Force | Out-Null
 
 $generated = @('Telegram_Digest.exe', 'Telegram_Digest.exe.sha256')
@@ -97,5 +113,8 @@ $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
     [Text.UTF8Encoding]::new($false)
 )
 
+Copy-Item -LiteralPath $standaloneUpdaterSource -Destination $standaloneUpdater -Force
+
 Write-Host "Release candidate: $zip"
 Write-Host "SHA-256: $hash"
+Write-Host "Standalone updater: $standaloneUpdater"

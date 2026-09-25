@@ -59,6 +59,12 @@ jobs:
             [void][ScriptBlock]::Create($text)
           }
 
+          $portable = Get-Content -LiteralPath '.\TelegramNewsAI_Update.cmd' -Raw -Encoding UTF8
+          $marker = ':__POWERSHELL_PAYLOAD__'
+          $index = $portable.LastIndexOf($marker, [StringComparison]::Ordinal)
+          if ($index -lt 0) { throw 'Portable updater payload marker not found.' }
+          [void][ScriptBlock]::Create($portable.Substring($index + $marker.Length))
+
       - name: Verify launcher checksum and self-test
         shell: pwsh
         run: |
@@ -83,6 +89,10 @@ jobs:
         shell: powershell
         run: |
           .\scripts\build_release.ps1 -OutputDirectory "$env:RUNNER_TEMP\release"
+          $portableUpdater = Join-Path "$env:RUNNER_TEMP\release" 'TelegramNewsAI_Update.cmd'
+          if (-not (Test-Path -LiteralPath $portableUpdater -PathType Leaf)) {
+            throw 'Standalone portable updater was not emitted.'
+          }
 
       - name: Verify clean install from release candidate
         shell: powershell
@@ -192,8 +202,26 @@ jobs:
             $before[$name] = (Get-FileHash -LiteralPath (Join-Path $target $name) -Algorithm SHA256).Hash
           }
 
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'update.ps1') -TargetPath $target
+          $python = (Get-Command python.exe -ErrorAction Stop).Source
+          $holdArgs = @(
+            '-c',
+            'import time; time.sleep(4)',
+            $collector
+          )
+          $hold = Start-Process -FilePath $python -ArgumentList $holdArgs -PassThru
+          Start-Sleep -Milliseconds 500
+          $waitStarted = Get-Date
+
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'update.ps1') -TargetPath $target -WaitForExit
           if ($LASTEXITCODE -ne 0) { throw "Real release updater integration failed: $LASTEXITCODE" }
+
+          $waitElapsed = ((Get-Date) - $waitStarted).TotalSeconds
+          if ($waitElapsed -lt 2.5) {
+            throw "Updater did not wait for the active installation process: $waitElapsed seconds"
+          }
+          if (-not $hold.HasExited) {
+            throw 'Updater returned before the simulated active installation process exited.'
+          }
 
           $updatedVersion = (Select-String -LiteralPath $collector -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           if ($updatedVersion -ne '5.5.0 Stable') { throw "Updater did not install 5.5.0 Stable: $updatedVersion" }
@@ -251,5 +279,6 @@ jobs:
           path: |
             ${{ runner.temp }}/release/*.zip
             ${{ runner.temp }}/release/*.sha256.txt
+            ${{ runner.temp }}/release/*.cmd
           if-no-files-found: error
           retention-days: 30

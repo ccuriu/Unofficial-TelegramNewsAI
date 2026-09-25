@@ -15,5 +15,6 @@
     "Telegram_Digest.exe",
     "Telegram_Digest.exe.sha256"
   ],
-  "ObsoleteFiles": []
+  "ObsoleteFiles": [],
+  "StandaloneUpdater": "TelegramNewsAI_Update.cmd"
 }

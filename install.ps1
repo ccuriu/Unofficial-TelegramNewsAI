@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $appDir
 $minimumPython = [Version]'3.10'
+$registryPath = 'HKCU:\Software\Unofficial TelegramNewsAI'
 
 function Get-PythonVersion($candidate) {
     try {
@@ -16,6 +17,19 @@ function Get-PythonVersion($candidate) {
         return $null
     }
 }
+
+function Set-InstallRegistration([string]$Path) {
+    try {
+        if (-not (Test-Path -LiteralPath $registryPath)) {
+            New-Item -Path $registryPath -Force | Out-Null
+        }
+        New-ItemProperty -Path $registryPath -Name InstallPath -Value $Path -PropertyType String -Force | Out-Null
+    }
+    catch {
+        Write-Host 'Предупреждение: не удалось сохранить путь установки в профиле Windows.'
+    }
+}
+
 
 function Find-Python {
     $commands = @(
@@ -137,6 +151,8 @@ catch {
 if ($venvBackup -and (Test-Path -LiteralPath $venvBackup)) {
     Remove-Item -LiteralPath $venvBackup -Recurse -Force
 }
+
+Set-InstallRegistration ([IO.Path]::GetFullPath($appDir).TrimEnd('\'))
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 if ($desktop -and -not $NoShortcut) {
