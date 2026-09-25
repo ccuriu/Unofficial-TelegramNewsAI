@@ -4426,6 +4426,10 @@ class OfflineRegressionTests(unittest.TestCase):
             readme,
         )
         self.assertIn(
+            "JSON/Markdown-экспорт → просмотр или дальнейшая обработка по выбору пользователя",
+            readme,
+        )
+        self.assertNotIn(
             "полный JSON + плоский Markdown для ИИ → выбранный пользователем ИИ → дайджест событий",
             readme,
         )
