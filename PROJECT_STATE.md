@@ -32,16 +32,17 @@ Updated: 2026-09-25
 - Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
 - Current pre-public `main`: PASS (CI #261, 201 tests)
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
+- Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
 
 ## Current phase
 
-**PRE-PUBLIC REPOSITORY PREPARATION**
+**PUBLIC STABLE OPERATION / OBSERVATION**
 
 The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
 
-Current work is limited to the final GitHub UI settings: remove the misleading `ai` topic, switch repository visibility to public, then verify the public Security/secret-scanning surface. Source/documentation/history and obsolete refs/releases cleanup are already accepted.
+The repository is public and the supported `v5.5.0 Stable` binary Release is published. Return to normal Stable operation/observation; do not reopen Telegram/network development without a reproducible defect, recurring usability/quality problem, or safety regression.
 
-Public source-code visibility and a new public binary Release/tag are separate decisions. Opening the source repository does not require another 50-source load test.
+Public source-code visibility and the `v5.5.0` binary Release are now complete. Future Releases remain separate release decisions and do not require repeating accepted network load tests unless Telegram-facing behavior changes.
 
 ## Source of truth
 
@@ -66,9 +67,12 @@ Completed GitHub cleanup:
 - historical GitHub Releases `v5.4.7`–`v5.4.10` removed;
 - repository description is already neutral and accurate.
 
-Remaining GitHub UI steps:
-- remove the misleading repository topic `ai`;
-- switch visibility private → public;
-- immediately check the public Security/secret-scanning surface, Releases and Branches pages.
+Post-public follow-up:
+- repository visibility: public;
+- supported Release: `v5.5.0 Stable`;
+- Branches page: only `main`;
+- Releases page: only current `v5.5.0`;
+- remove the repository topic `ai` if it is still present, because the application has no embedded AI API;
+- keep GitHub Security/secret-scanning alerts at zero; investigate immediately if one appears.
 
 Telegram API Terms, Content Licensing and Sponsored Messages remain external platform rules. The project documentation describes actual local behavior and does not claim a special exemption.
