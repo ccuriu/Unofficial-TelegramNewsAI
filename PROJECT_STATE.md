@@ -31,6 +31,7 @@ Updated: 2026-09-25
 - Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
 - Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
 - Current pre-public `main`: PASS (CI #261, 201 tests)
+- Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 
 ## Current phase
 
@@ -38,7 +39,7 @@ Updated: 2026-09-25
 
 The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
 
-Current work is limited to GitHub administration: remove obsolete branches/tags/releases, adjust public repository metadata, then change repository visibility. The source/documentation/history gates are already accepted.
+Current work is limited to the final GitHub UI settings: remove the misleading `ai` topic, switch repository visibility to public, then verify the public Security/secret-scanning surface. Source/documentation/history and obsolete refs/releases cleanup are already accepted.
 
 Public source-code visibility and a new public binary Release/tag are separate decisions. Opening the source repository does not require another 50-source load test.
 
@@ -59,11 +60,15 @@ Completed before visibility changes:
 - obsolete public-facing screenshots were removed;
 - all 130 reachable commits were scanned for common secret/user-data patterns; only explicit dummy test fixtures matched.
 
-Remaining GitHub-admin steps:
-- delete the four obsolete branches listed in `docs/PUBLIC_RELEASE_CHECKLIST.md`;
-- delete or deliberately retain historical 5.4.x tags/releases; current decision is to remove them so they cannot look like supported builds;
-- update repository description/topics for the public page;
+Completed GitHub cleanup:
+- obsolete branches removed; only `main` remains;
+- historical tags `v5.4.1`–`v5.4.10` removed;
+- historical GitHub Releases `v5.4.7`–`v5.4.10` removed;
+- repository description is already neutral and accurate.
+
+Remaining GitHub UI steps:
+- remove the misleading repository topic `ai`;
 - switch visibility private → public;
-- immediately check the public Security/secret-scanning surface and the visible Releases/Branches page.
+- immediately check the public Security/secret-scanning surface, Releases and Branches pages.
 
 Telegram API Terms, Content Licensing and Sponsored Messages remain external platform rules. The project documentation describes actual local behavior and does not claim a special exemption.
