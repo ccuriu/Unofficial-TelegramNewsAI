@@ -1,6 +1,6 @@
 # TelegramNewsAI — Project State
 
-Updated: 2026-09-24
+Updated: 2026-09-25
 
 ## Accepted baseline
 
@@ -23,7 +23,7 @@ Updated: 2026-09-24
 - Profile 9.0 prompt cleanup regression: PASS (CI #240, 196 tests)
 - Profile 9.1 scoped-request direct source-link regression: PASS (CI #247, 197 tests)
 - Locked AI-export replacement fallback: PASS (CI #243, 197 tests)
-- Portable standalone updater / no forced active-session shutdown: pending PR CI
+- Portable standalone updater / no forced active-session shutdown: PASS (CI #251, 201 tests)
 - Stable release CI #224: 194 tests PASS
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
