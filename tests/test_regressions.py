@@ -4479,6 +4479,47 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertLess(fast, fallback)
         self.assertIn("return $resolved", installer[fast:fallback])
 
+    def test_installer_registers_install_path_for_portable_updater(self):
+        installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn("HKCU:\\Software\\Unofficial TelegramNewsAI", installer)
+        self.assertIn("Set-InstallRegistration", installer)
+        self.assertIn("InstallPath", installer)
+
+    def test_bundled_updater_can_wait_without_stopping_active_session(self):
+        updater = (ROOT / "update.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$WaitForExit", updater)
+        self.assertIn("while (Test-ApplicationRunning $target)", updater)
+        self.assertIn("Текущий запуск не прерывается", updater)
+        self.assertNotIn("Stop-Process", updater)
+        self.assertIn("Set-InstallRegistration $target", updater)
+
+    def test_portable_standalone_updater_is_location_independent(self):
+        updater_path = ROOT / "TelegramNewsAI_Update.cmd"
+        self.assertTrue(updater_path.exists())
+        updater = updater_path.read_text(encoding="utf-8")
+        self.assertIn("Resolve-InstallationCandidates", updater)
+        self.assertIn("HKCU:\\Software\\Unofficial TelegramNewsAI", updater)
+        self.assertIn("FolderBrowserDialog", updater)
+        self.assertIn("OpenFileDialog", updater)
+        self.assertIn("Unofficial-TelegramNewsAI-*-Windows.zip", updater)
+        self.assertIn("-WaitForExit", updater)
+        self.assertIn("не будет принудительно закрыта", updater)
+        self.assertIn("telegram_session", updater.lower())
+        self.assertNotIn("Stop-Process", updater)
+
+    def test_release_builder_emits_standalone_updater_outside_zip(self):
+        builder = (ROOT / "scripts" / "build_release.ps1").read_text(encoding="utf-8-sig")
+        manifest = __import__("json").loads(
+            (ROOT / "release_manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["StandaloneUpdater"], "TelegramNewsAI_Update.cmd")
+        self.assertIn("$standaloneUpdater", builder)
+        self.assertIn("Copy-Item -LiteralPath $standaloneUpdaterSource", builder)
+        self.assertNotIn(
+            manifest["StandaloneUpdater"],
+            manifest["ProgramFiles"],
+        )
+
     def test_user_facing_branding_is_unofficial(self):
         self.assertEqual(
             collector.APP_DISPLAY_NAME,
@@ -4543,6 +4584,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("release_manifest.json", builder)
         for required in ("LICENSE", "SECURITY.md", "Telegram_Digest.exe.sha256", "UPDATE.bat", "update.ps1"):
             self.assertIn(required, manifest["ProgramFiles"])
+        self.assertEqual(manifest["StandaloneUpdater"], "TelegramNewsAI_Update.cmd")
         self.assertIn("Unofficial-TelegramNewsAI-$version-$channel-Windows", builder)
         self.assertIn("launcher\\build_launcher.ps1", builder)
         self.assertNotIn(".gitignore", manifest["ProgramFiles"])
@@ -4554,6 +4596,8 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertIn("actions/setup-python@v7", workflow)
         self.assertIn("actions/upload-artifact@v7", workflow)
         self.assertIn("Verify exact release ZIP contents", workflow)
+        self.assertIn("TelegramNewsAI_Update.cmd", workflow)
+        self.assertIn("release/*.cmd", workflow)
 
     def test_preview_has_no_fixed_topic_classifier(self):
         self.assertNotIn("topicRules", collector.PREVIEW_HTML)
