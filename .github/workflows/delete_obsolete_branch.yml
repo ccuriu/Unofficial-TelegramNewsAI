@@ -1,0 +1,23 @@
+name: Delete obsolete release branch
+
+on:
+  push:
+    branches:
+      - release/publish-direct-updater
+    paths:
+      - .github/workflows/delete_obsolete_branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this obsolete branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api -X DELETE "repos/$REPO/git/refs/heads/release%2Fpublish-direct-updater"
