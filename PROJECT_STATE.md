@@ -35,6 +35,7 @@ Updated: 2026-09-25
 - Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
 - Pre-public accepted `main`: PASS (CI #261, 201 tests)
 - Direct-updater `main` after merge: PASS (CI #275, 202 tests)
+- Direct-updater rollout finalized; one-time publisher removed: PASS (CI #281, 202 tests)
 - Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
 - Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
 
