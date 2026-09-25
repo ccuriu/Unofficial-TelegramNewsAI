@@ -34,7 +34,7 @@
 5. Нажмите Enter или `D`, оставьте период 24 часа и дождитесь завершения. Проводник автоматически откроет папку и выделит `ДАЙДЖЕСТ_ДЛЯ_ИИ.md`.
 
 > [!TIP]
-> **Нужна пошаговая инструкция?** Откройте **[установку и первый запуск](docs/INSTALLATION.md)** — от скачивания архива до первого готового дайджеста.
+> **Нужна пошаговая инструкция?** Откройте **[установку и первый запуск](docs/INSTALLATION.md)** или **[скачайте PDF-памятку](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/download/v5.5.0/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf)**.
 
 ## Возможности
 
@@ -64,6 +64,7 @@
 Подробности, первый вход в Telegram, выбор каналов и создание первого дайджеста:
 
 - **[Пошаговая инструкция в браузере](docs/INSTALLATION.md)** — установка, первый вход, выбор каналов и первый дайджест.
+- **[PDF-памятка](https://github.com/ccuriu/Unofficial-TelegramNewsAI/releases/download/v5.5.0/Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf)** — компактная версия для скачивания.
 
 Поддерживаются Windows 10/11 и Python 3.10+. Установщик создаёт изолированное `.venv`; если подходящего Python нет, он может установить Python 3.13 через Windows Package Manager.
 
