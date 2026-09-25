@@ -1,0 +1,86 @@
+name: Publish v5.5.0 Stable
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish_v550_release.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download already-verified CI artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p release_files
+          gh run download 36089364027 \
+            --repo "$REPO" \
+            --name "Unofficial-TelegramNewsAI-Windows-Build" \
+            --dir release_files
+
+      - name: Verify exact release files and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release_files/Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.zip
+          test -f release_files/Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.sha256.txt
+          test -f release_files/TelegramNewsAI_Update.cmd
+          test "$(find release_files -maxdepth 1 -type f | wc -l)" -eq 3
+          (
+            cd release_files
+            sha256sum --check Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.sha256.txt
+          )
+
+      - name: Publish v5.5.0 Stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view v5.5.0 --repo "$REPO" >/dev/null 2>&1; then
+            echo "v5.5.0 already exists; refusing to overwrite."
+            exit 1
+          fi
+
+          cat > release_notes.md <<'EOF'
+          ## Unofficial TelegramNewsAI 5.5.0 Stable
+
+          Первая публичная Stable-сборка текущей линии проекта.
+
+          ### Что входит
+          - локальный сбор публикаций выбранных Telegram-каналов через Telethon / MTProto;
+          - до 50 выбранных источников;
+          - локальная SQLite-база, история и поиск FTS5/LIKE;
+          - догрузка пропущенных публикаций и аккуратная дедупликация;
+          - JSON/Markdown-экспорт для дальнейшего просмотра и анализа;
+          - прямые ссылки на исходные публичные публикации, когда они доступны;
+          - защищённое локальное хранение Telegram API-данных через Windows DPAPI;
+          - безопасное обновление с сохранением Telegram-сессии, настроек, базы и истории;
+          - отдельный переносимый `TelegramNewsAI_Update.cmd`.
+
+          ### Установка
+          Скачайте `Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.zip`, при желании проверьте SHA-256 по приложенному файлу, распакуйте архив и запустите `INSTALL.bat`.
+
+          При первом подключении используйте собственные Telegram API ID и API Hash с my.telegram.org.
+
+          ### Важно
+          Проект не связан с Telegram FZ-LLC и не является официальным приложением Telegram. Программа сама не отправляет собранное содержимое во внешние AI/ML-сервисы.
+          EOF
+
+          gh release create v5.5.0 \
+            --repo "$REPO" \
+            --target fc7f03c7f288172c6e2a9631a7ef53019798b1ae \
+            --title "Unofficial TelegramNewsAI 5.5.0 Stable" \
+            --notes-file release_notes.md \
+            release_files/Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.zip \
+            release_files/Unofficial-TelegramNewsAI-5.5.0-Stable-Windows.sha256.txt \
+            release_files/TelegramNewsAI_Update.cmd
