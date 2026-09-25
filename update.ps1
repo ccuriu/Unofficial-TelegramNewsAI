@@ -73,6 +73,18 @@ function Resolve-ShortcutCandidates {
     )
     $result = @()
 
+    try {
+        $registered = (Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop).InstallPath
+        if (
+            (Test-InstallationFolder $registered) -and
+            $seen.Add([IO.Path]::GetFullPath($registered))
+        ) {
+            $result += [IO.Path]::GetFullPath($registered)
+        }
+    }
+    catch {
+    }
+
     foreach ($desktop in $desktops) {
         $shortcutPath = Join-Path $desktop $shortcutName
         if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
