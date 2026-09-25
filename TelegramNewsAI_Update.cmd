@@ -2,7 +2,6 @@
 chcp 65001 >nul
 setlocal
 set "TELEGRAMNEWSAI_UPDATER_SELF=%~f0"
-set "TELEGRAMNEWSAI_UPDATER_MODE=%~1"
 title Обновление Unofficial TelegramNewsAI
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$self=$env:TELEGRAMNEWSAI_UPDATER_SELF; $raw=[IO.File]::ReadAllText($self,[Text.Encoding]::UTF8); $marker=':__POWERSHELL_PAYLOAD__'; $index=$raw.LastIndexOf($marker,[StringComparison]::Ordinal); if($index -lt 0){Write-Error 'Updater payload not found.'; exit 2}; $script=$raw.Substring($index+$marker.Length); & ([ScriptBlock]::Create($script))"
