@@ -1,4 +1,4 @@
-# TelegramNewsAI — Project State
+# Unofficial TelegramNewsAI — Project State
 
 Updated: 2026-09-25
 
@@ -28,46 +28,34 @@ Updated: 2026-09-25
 - Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
 - Local Stable installation/update: PASS
 - Telegram session, credentials, settings, selected channels, database and digest history preserved
+- Pre-public documentation / branding / repository hygiene: pending PR CI
 
 ## Current phase
 
-**NORMAL STABLE OPERATION / OBSERVATION**
+**PRE-PUBLIC REPOSITORY PREPARATION**
 
-Use the program normally. Do not create development work merely to keep the project active.
+The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
 
-Open a new development cycle only for:
-- a reproducible TelegramNewsAI defect;
-- a recurring quality/usability problem visible in normal use;
-- a safety or reliability regression.
+Current work is limited to public-facing documentation and GitHub repository hygiene: remove obsolete screenshots/branches/releases, verify history for secrets, align naming with `Unofficial TelegramNewsAI`, and then change repository visibility.
 
-Before changing code, separate:
-1. TelegramNewsAI/export defect;
-2. external AI-model behavior;
-3. weakness or contradiction in source material;
-4. acceptable editorial variation.
-
-## Current observation gate
-
-Evaluate 3–5 ordinary real digests, or stop earlier if a significant reproducible defect appears.
-
-Do not:
-- repeat already accepted general audits without a regression or new evidence;
-- run Telegram load tests without a concrete reason;
-- change code for isolated external-model errors;
-- raise the 50-source product limit just for testing;
-- introduce embeddings, heavy ML, a new transport, server/cloud infrastructure, or another large subsystem without demonstrated practical benefit.
+Public source-code visibility and a new public binary Release/tag are separate decisions. Opening the source repository does not require another 50-source load test.
 
 ## Source of truth
 
 Use, in order:
 1. actual repository `main`;
-2. this file for the latest accepted project phase and baseline;
-3. the current coordinating chat for temporary next-step planning.
+2. this file;
+3. current coordinating chat.
 
-Completed specialist chats are temporary working material and may be deleted after their result is anchored in GitHub.
+Historical testing plans and completed specialist chats do not override current `main` / this state.
 
-## Public distribution
+## Public repository gate
 
-Public GitHub Release/tag and broader distribution are separate future decisions.
+Before visibility changes to public:
+- current main CI must be green;
+- no local user data or credentials may be tracked;
+- old public-facing screenshots must not misrepresent the current version;
+- historical branches/releases/tags require an explicit keep/delete decision;
+- perform the final GitHub secret/history check available to the account.
 
-Telegram API Terms, Content Licensing / AI-related restrictions, and Sponsored Messages applicability remain separate questions to resolve before wider public distribution. They do not reopen the already accepted personal local Stable by themselves.
+Telegram API Terms, Content Licensing and Sponsored Messages remain external platform rules. The project documentation describes actual local behavior and does not claim a special exemption.
