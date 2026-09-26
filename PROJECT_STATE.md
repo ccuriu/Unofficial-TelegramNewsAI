@@ -1,6 +1,6 @@
 # Unofficial TelegramNewsAI — Project State
 
-Updated: 2026-09-25
+Updated: 2026-09-26
 
 ## Accepted baseline
 
@@ -11,79 +11,65 @@ Updated: 2026-09-25
 - Digest profile: `9.1`
 - Maximum selected sources: `50`
 - Production Telegram transport: Telethon / MTProto
-- Web-preview: research only, not production
+- Web preview: research only, not production
 
-## Accepted gates
+## Accepted quality and safety state
 
-- Real 50-source RUN 3 network/API safety: PASS
-- No FloodWait, retries, account/session safety signals or forced reauthorization in accepted RUN 3
-- SQLite `PRAGMA quick_check = ok`
-- Profile 8.7 event-candidate acceptance: PASS
-- Profile 8.8 clickable source-link regression: PASS (CI #233, 194 tests)
-- Profile 8.9 plain-chat output regression: PASS (CI #236, 195 tests)
-- Profile 9.0 prompt cleanup regression: PASS (CI #240, 196 tests)
-- Profile 9.1 scoped-request direct source-link regression: PASS (CI #247, 197 tests)
-- Locked AI-export replacement fallback: PASS (CI #243, 197 tests)
-- Portable standalone updater / no forced active-session shutdown: PASS (CI #251, 201 tests)
-- Direct Stable updater without release ZIP download: PASS (PR #54; runtime path-normalization defect fixed in PR #59)
-- Standalone updater Windows runtime self-test: PASS (CI #286/#288, 202 tests)
-- Public `v5.5.0` standalone updater asset refreshed from verified CI #286; SHA-256 `bccb0aeb6cbc7183602b2e74c1b8fd0d58e4242a23ce4fa5ee184743be1d30d8`
-- Live public-updater smoke on the actual installed Windows copy: PASS; install auto-detected; no ZIP path; protected session/credentials/settings/channels/database files unchanged byte-for-byte
-- Stable release CI #224: 194 tests PASS
-- Equal-version updater path `5.5.0 Testing -> 5.5.0 Stable`: PASS
-- Local Stable installation/update: PASS
-- Telegram session, credentials, settings, selected channels, database and digest history preserved
-- Pre-public documentation / branding / repository hygiene: PASS (CI #259, 201 tests)
-- Full pre-public Git-history secret/user-data pattern scan: PASS (130/130 commits; only explicit dummy fixtures matched)
-- Pre-public accepted `main`: PASS (CI #261, 201 tests)
-- Direct-updater `main` after merge: PASS (CI #275, 202 tests)
-- Obsolete GitHub branches/tags/releases cleanup: PASS (one-time GitHub Actions cleanup; verified from API)
-- Public `v5.5.0 Stable` Release: PASS (published from verified CI #267 artifact; ZIP checksum verified before publication)
-- User-facing onboarding documentation: PASS (README quick-start diagram + `docs/INSTALLATION.md` first-run guide)
-- Public v5.5.0 quick-start PDF: PASS (`Unofficial-TelegramNewsAI-5.5.0-Quick-Start.pdf`, Release asset SHA-256 `4d494fd4ec4d5f13607c24135f8868ce2dc7d089dce20b03bc647708c9a010dc`); first-login wording explicitly uses right-click paste behavior and a country-neutral international phone-number format
+- Real 50-source Telegram/API safety acceptance: PASS.
+- No FloodWait, forced reauthorization, account/session safety signal or observed message-loss regression in the accepted Stable run.
+- SQLite integrity / retention / search regression coverage: PASS.
+- Event-candidate, continuity-context, direct source-link and Markdown/JSON export regressions: PASS.
+- Standalone updater self-test, clean install and in-place update: PASS.
+- Live updater smoke on the installed Windows copy: PASS; session, credentials, settings, selected channels and database were preserved byte-for-byte.
+- Public Stable release ZIP and checksum: PASS.
+- Public updater asset SHA-256: `bccb0aeb6cbc7183602b2e74c1b8fd0d58e4242a23ce4fa5ee184743be1d30d8`.
+- Public quick-start PDF SHA-256: `4d494fd4ec4d5f13607c24135f8868ce2dc7d089dce20b03bc647708c9a010dc`.
+- User-facing onboarding: README quick start + `docs/INSTALLATION.md` + Release PDF.
+- Public repository hygiene: tracked local credentials/session/database/settings/logs are excluded; public fixtures use synthetic channel names, usernames, IDs and example links.
+- Repository topic `ai` is not present; current positioning does not claim an embedded AI API.
 
 ## Current phase
 
 **PUBLIC STABLE OPERATION / OBSERVATION**
 
-Public-opening stage: **COMPLETE**. Public positioning now states the intended workflow explicitly: local Telegram collection and history → structured digest → optional user-initiated review or analysis by an external agent/assistant. The application itself has no embedded AI API and performs no automatic external transfer.
+The supported `v5.5.0 Stable` release is public and the normal product flow is complete:
 
-The program baseline remains Stable. Do not reopen Telegram/network development without a reproducible defect or safety regression.
+**selected Telegram sources → local SQLite history → selected period/search → Markdown/JSON export → optional user-initiated external analysis.**
 
-The repository is public and the supported `v5.5.0 Stable` binary Release is published. Return to normal Stable operation/observation; do not reopen Telegram/network development without a reproducible defect, recurring usability/quality problem, or safety regression.
+The application itself has no embedded AI API and performs no automatic transfer of Telegram content to an external AI/ML service.
 
-Public source-code visibility and the `v5.5.0` binary Release are now complete. Future Releases remain separate release decisions and do not require repeating accepted network load tests unless Telegram-facing behavior changes.
+Do not reopen Telegram/network development without a reproducible defect, recurring quality/usability problem, or safety/reliability regression. A one-off external-model mistake is not a collector/export defect when the required material is present correctly in the export.
 
 ## Source of truth
 
 Use, in order:
+
 1. actual repository `main`;
 2. this file;
 3. current coordinating chat.
 
-Historical testing plans and completed specialist chats do not override current `main` / this state.
+README, SECURITY.md, tests and GitHub history clarify details but do not override current `main`.
 
-## Public repository gate
+## Public repository status
 
-Completed before visibility changes:
-- current main CI is green (CI #261, 201 tests);
-- local user data / credentials are not tracked;
-- obsolete public-facing screenshots were removed;
-- all 130 reachable commits were scanned for common secret/user-data patterns; only explicit dummy test fixtures matched.
+- Visibility: public.
+- Supported Release: `v5.5.0 Stable`.
+- Stable branch policy: `main` is the accepted source branch; temporary PR branches are deleted after merge.
+- User-facing docs contain no real Telegram channel list or private user data.
+- Regression fixtures must use synthetic channel names/usernames/IDs unless a real platform identifier is essential to the behavior being tested.
+- Official Telegram/platform URLs and reserved/example URLs are allowed where they document or test protocol behavior.
+- Historical one-time release/audit details remain available in Git history instead of being carried as active public documentation.
 
-Completed GitHub cleanup:
-- obsolete branches removed; only `main` remains;
-- historical tags `v5.4.1`–`v5.4.10` removed;
-- historical GitHub Releases `v5.4.7`–`v5.4.10` removed;
-- repository/README positioning is finalized around the actual product purpose: local collection and structured digest preparation for manual review or user-initiated external analysis.
-- README now includes a concise visual quick start and links to a dedicated browser-based installation/first-run guide.
+## Language handling
 
-Post-public follow-up:
-- repository visibility: public;
-- supported Release: `v5.5.0 Stable`;
-- Branches page: only `main`;
-- Releases page: only current `v5.5.0`;
-- remove the repository topic `ai` if it is still present, because the application has no embedded AI API;
-- keep GitHub Security/secret-scanning alerts at zero; investigate immediately if one appears.
+The public UI/documentation is Russian-first. Ukrainian text that remains inside the collector or regression suite is intentional language-processing coverage (stopwords, morphology, RU/UA aliases and multilingual Telegram-content handling), not user-specific data. Do not remove it merely for cosmetic repository cleanup if doing so would reduce search or digest quality.
 
-Telegram API Terms, Content Licensing and Sponsored Messages remain external platform rules. The project documentation describes actual local behavior and does not claim a special exemption.
+## Operational guardrails
+
+- Account safety is more important than channel count or speed.
+- Keep Telegram collection sequential and stop the relevant network stage on FloodWait, PEER_FLOOD, revoked/lost session or similar safety signals.
+- Do not add aggressive parallel collection, alternate scraping transports or extra Telegram APIs without demonstrated need.
+- Do not repeat accepted Telegram network load tests for documentation-only or offline changes.
+- API ID, API Hash, session files, credentials, tokens and passwords are secrets and must not be committed or exposed.
+- Prefer small, evidence-driven fixes over broad refactors.
+- If no useful next development stage exists, continue Stable operation/observation.
