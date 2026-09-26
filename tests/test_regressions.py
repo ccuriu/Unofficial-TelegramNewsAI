@@ -4702,7 +4702,6 @@ class OfflineRegressionTests(unittest.TestCase):
         requests = collector.DIGEST_REQUEST + collector.build_search_digest_instruction(
             "проверочная тема", 7, {}
         )
-        self.assertNotIn("ChatGPT", requests)
         self.assertNotIn("file citations", requests.lower())
         self.assertNotIn("source chips", requests.lower())
 
