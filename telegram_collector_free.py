@@ -8402,7 +8402,7 @@ def _v4_save_search_output(conn, question, days, settings, db_maintenance, chann
             ),
             "usage_hint": (
                 "Локальный структурированный JSON-экспорт для пользовательского "
-                "анализа в выбранном ИИ-ассистенте, например ChatGPT. Вопрос, "
+                "анализа в выбранном внешнем агенте или ассистенте. Вопрос, "
                 "период и готовая инструкция уже записаны внутри файла; программа "
                 "не отправляет его во внешние сервисы автоматически."
             ),
@@ -10272,7 +10272,7 @@ def search_database(conn, question, days, settings, channel_ids=None, limit_over
         direct.append(message)
 
     # 4) Совместимый остаток старого смыслового резерва.
-    # Начиная с 5.4.13 semantic_enabled принудительно False, поэтому Telegram-контент
+    # semantic_enabled в текущем Stable-профиле отключён, поэтому Telegram-контент
     # обрабатывается только локальным FTS5/LIKE-поиском без ML-модели.
     semantic_meta = {
         'enabled': bool(settings.get('semantic_enabled', False)),
