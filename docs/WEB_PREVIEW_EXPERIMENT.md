@@ -58,9 +58,9 @@ Representative seven-day crawl results included:
 
 Examples recorded by the experiment:
 
-- `kharkivlife`: 29 pages;
-- `SolovievLive`: 45 pages;
-- `infantmilitario`: 29 pages.
+- `example_channel_a`: 29 pages;
+- `example_channel_b`: 45 pages;
+- `example_channel_c`: 29 pages.
 
 Conclusion: seven-day `?before=` pagination is technically viable in the tested conditions.
 
