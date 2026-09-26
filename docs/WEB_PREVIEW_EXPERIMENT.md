@@ -2,18 +2,6 @@
 
 Status: **experiment completed; not accepted as production transport for the first Stable**
 
-Experiment branch:
-
-`experiment/web-preview-collector`
-
-Final experiment commit:
-
-`b3d5f6d318826e8038b7fa96387d96b44216bb36`
-
-Production checkpoint used by the experiment:
-
-`ed6f7c10f361e8187f0451f65259a90203e32de4`
-
 This document intentionally carries only the final evidence and decision into `main`. The experimental collector, experiment-only requirements and experiment GitHub workflow remain outside production.
 
 ## Decision
