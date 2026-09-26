@@ -68,7 +68,7 @@
 
 Поддерживаются Windows 10/11 и Python 3.10+. Установщик создаёт изолированное `.venv`; если подходящего Python нет, он может установить Python 3.13 через Windows Package Manager.
 
-Для разработки или проверки исходников можно скачать snapshot ветки `main`; готовый Release и исходный репозиторий соответствуют одной линии **5.5.0 Stable**. Исторические 5.4.x tags/Releases удалены, чтобы устаревшие сборки не выглядели как текущие.
+Для разработки или проверки исходников можно скачать snapshot ветки `main`; готовый Release и исходный репозиторий соответствуют одной линии **5.5.0 Stable**.
 
 ### API ID и API Hash
 
@@ -139,7 +139,7 @@ API ID, API Hash и номер телефона вводятся локальн�
 
 Основная зависимость — `Telethon==1.44.0`. Windows CI на Python 3.13 проверяет compile/import, offline regression suite без Telegram-аккаунта, отсутствие отслеживаемых пользовательских данных, launcher self-test, clean install, in-place update и точный состав release ZIP.
 
-Текущий принятый статус хранится в [PROJECT_STATE.md](PROJECT_STATE.md). Pre-public проверки — в [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md).
+Текущий принятый статус и режим эксплуатации хранится в [PROJECT_STATE.md](PROJECT_STATE.md).
 
 ## Сообщить о проблеме
 
