@@ -833,14 +833,14 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_mixed_channel_selection_accepts_numbers_ranges_and_links(self):
         selected, public_values = collector.parse_mixed_channel_selection(
-            "3,7-10,12-36,https://t.me/durov,@insiderUKR",
+            "3,7-10,12-36,https://t.me/example_public_channel,@second_example_channel",
             40,
         )
         expected = {3, 7, 8, 9, 10} | set(range(12, 37))
         self.assertEqual(selected, expected)
         self.assertEqual(
             public_values,
-            ["https://t.me/durov", "@insiderUKR"],
+            ["https://t.me/example_public_channel", "@second_example_channel"],
         )
 
     def test_mixed_channel_selection_accepts_all_plus_public_link(self):
@@ -857,7 +857,7 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_mixed_channel_selection_rejects_out_of_bounds_range(self):
         with self.assertRaisesRegex(ValueError, "1-35"):
             collector.parse_mixed_channel_selection(
-                "3,12-36,https://t.me/durov",
+                "3,12-36,https://t.me/example_public_channel",
                 35,
             )
 
@@ -1030,16 +1030,16 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_readding_public_channel_repairs_stale_saved_username(self):
         existing = [
-            {"id": 99, "name": "Pavel Durov", "username": None}
+            {"id": 99, "name": "Example Public Channel", "username": None}
         ]
         fresh = {
             "id": 99,
-            "name": "Pavel Durov",
-            "username": "durov",
-            "entity": SimpleNamespace(id=99, username="durov"),
+            "name": "Example Public Channel",
+            "username": "example_public_channel",
+            "entity": SimpleNamespace(id=99, username="example_public_channel"),
         }
 
-        with patch("builtins.input", return_value="https://t.me/durov"):
+        with patch("builtins.input", return_value="https://t.me/example_public_channel"):
             with patch.object(
                 collector,
                 "resolve_public_channel",
@@ -1056,16 +1056,16 @@ class OfflineRegressionTests(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], 99)
-        self.assertEqual(result[0]["username"], "durov")
+        self.assertEqual(result[0]["username"], "example_public_channel")
         mocked_save.assert_called_once()
         saved = mocked_save.call_args.args[0]
-        self.assertEqual(saved[0]["username"], "durov")
+        self.assertEqual(saved[0]["username"], "example_public_channel")
         printed = " ".join(
             str(argument)
             for call in mocked_print.call_args_list
             for argument in call.args
         )
-        self.assertIn("Обновлён: Pavel Durov (@durov)", printed)
+        self.assertIn("Обновлён: Example Public Channel (@example_public_channel)", printed)
         self.assertIn("Обновлено сохранённых каналов: 1", printed)
 
     def test_merge_resolved_channel_keeps_single_item_and_refreshes_name(self):
@@ -1455,8 +1455,8 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_multilingual_text_survives_collection_sqlite_search_and_ai_export(self):
         samples = {
-            1: "Україна посилює енергосистему перед зимою",
-            2: "White House announced a new ceasefire framework",
+            1: "Тестове повідомлення українською мовою",
+            2: "A generic English test message about a scheduled event",
         }
         for message_id, text in samples.items():
             msg = SimpleNamespace(
@@ -1485,7 +1485,7 @@ class OfflineRegressionTests(unittest.TestCase):
 
         self.connection.commit()
 
-        english_results = self.search("ceasefire")["direct_results"]
+        english_results = self.search("scheduled")["direct_results"]
         self.assertEqual(
             [item["message_id"] for item in english_results],
             [2],
@@ -2054,7 +2054,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(collector.build_related_groups(messages), [])
 
     def test_exact_forward_origin_still_groups(self):
-        origin = "telegram_forward:2012559840:7831"
+        origin = "telegram_forward:1004004004:7831"
         messages = [
             {
                 "channel_id": 1,
@@ -2312,12 +2312,12 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
     def test_continuity_same_channel_telegram_self_link_is_not_strong(self):
-        shared_url = "https://t.me/ZE_kartel/13821"
+        shared_url = "https://t.me/example_alpha_channel/13821"
         prior = {
-            "channel_id": 1447182889,
-            "channel": "Картель",
-            "username": "ZE_kartel",
-            "channel_url": "https://t.me/ZE_kartel",
+            "channel_id": 1001001001,
+            "channel": "Example Alpha",
+            "username": "example_alpha_channel",
+            "channel_url": "https://t.me/example_alpha_channel",
             "message_id": 13840,
             "date_utc": "2026-09-20T08:00:00+00:00",
             "text": (
@@ -2328,10 +2328,10 @@ class OfflineRegressionTests(unittest.TestCase):
             "origin_key": "url:" + shared_url,
         }
         current = {
-            "channel_id": 1447182889,
-            "channel": "Картель",
-            "username": "ZE_kartel",
-            "channel_url": "https://t.me/ZE_kartel",
+            "channel_id": 1001001001,
+            "channel": "Example Alpha",
+            "username": "example_alpha_channel",
+            "channel_url": "https://t.me/example_alpha_channel",
             "message_id": 13849,
             "date_utc": "2026-09-21T08:00:00+00:00",
             "text": (
@@ -2346,9 +2346,9 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(context["messages_count"], 0)
 
     def test_continuity_private_telegram_self_link_is_not_strong(self):
-        shared_url = "https://t.me/c/1447182889/13821"
+        shared_url = "https://t.me/c/1001001001/13821"
         prior = {
-            "channel_id": -1001447182889,
+            "channel_id": -1001001001001,
             "channel": "Приватный канал",
             "message_id": 13840,
             "date_utc": "2026-09-20T08:00:00+00:00",
@@ -2357,7 +2357,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "origin_key": "url:" + shared_url,
         }
         current = {
-            "channel_id": -1001447182889,
+            "channel_id": -1001001001001,
             "channel": "Приватный канал",
             "message_id": 13849,
             "date_utc": "2026-09-21T08:00:00+00:00",
@@ -2370,12 +2370,12 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(context["messages_count"], 0)
 
     def test_continuity_second_real_self_link_pattern_is_not_strong(self):
-        shared_url = "https://t.me/MediaKiller2021/24689"
+        shared_url = "https://t.me/example_beta_channel/24689"
         prior = {
-            "channel_id": 1559000001,
-            "channel": "MediaKiller",
-            "username": "MediaKiller2021",
-            "channel_url": "https://t.me/MediaKiller2021",
+            "channel_id": 1002002002,
+            "channel": "Example Beta",
+            "username": "example_beta_channel",
+            "channel_url": "https://t.me/example_beta_channel",
             "message_id": 24700,
             "date_utc": "2026-09-20T08:00:00+00:00",
             "text": (
@@ -2386,10 +2386,10 @@ class OfflineRegressionTests(unittest.TestCase):
             "origin_key": "url:" + shared_url,
         }
         current = {
-            "channel_id": 1559000001,
-            "channel": "MediaKiller",
-            "username": "MediaKiller2021",
-            "channel_url": "https://t.me/MediaKiller2021",
+            "channel_id": 1002002002,
+            "channel": "Example Beta",
+            "username": "example_beta_channel",
+            "channel_url": "https://t.me/example_beta_channel",
             "message_id": 24720,
             "date_utc": "2026-09-21T08:00:00+00:00",
             "text": (
@@ -2432,12 +2432,12 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(context["messages_count"], 0)
 
     def test_continuity_self_link_can_support_but_not_upgrade_lexical_match(self):
-        shared_url = "https://t.me/ZE_kartel/13821"
+        shared_url = "https://t.me/example_alpha_channel/13821"
         prior = {
-            "channel_id": 1447182889,
-            "channel": "Картель",
-            "username": "ZE_kartel",
-            "channel_url": "https://t.me/ZE_kartel",
+            "channel_id": 1001001001,
+            "channel": "Example Alpha",
+            "username": "example_alpha_channel",
+            "channel_url": "https://t.me/example_alpha_channel",
             "message_id": 13840,
             "date_utc": "2026-09-20T08:00:00+00:00",
             "text": (
@@ -2448,10 +2448,10 @@ class OfflineRegressionTests(unittest.TestCase):
             "origin_key": "url:" + shared_url,
         }
         current = {
-            "channel_id": 1447182889,
-            "channel": "Картель",
-            "username": "ZE_kartel",
-            "channel_url": "https://t.me/ZE_kartel",
+            "channel_id": 1001001001,
+            "channel": "Example Alpha",
+            "username": "example_alpha_channel",
+            "channel_url": "https://t.me/example_alpha_channel",
             "message_id": 13849,
             "date_utc": "2026-09-21T08:00:00+00:00",
             "text": (
@@ -2714,27 +2714,27 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_continuity_event_anchor_does_not_merge_recurring_daily_regional_briefings(self):
         prior = {
-            "channel_id": 1395451700,
-            "channel": "Харьков life | Харків",
-            "username": "kharkivlife",
+            "channel_id": 1003003003,
+            "channel": "Example Regional News",
+            "username": "example_region",
             "message_id": 10,
             "date_utc": "2026-09-20T05:45:35+00:00",
             "text": (
-                "Харківщина: за добу постраждали 4 людини\n\n"
-                "Ворожих ударів зазнали Харків та 10 населених пунктів області. "
-                "Пошкоджені будинки, автомобілі, енергомережі та склад."
+                "Регион: за сутки пострадали 4 человека\n\n"
+                "Повреждения зафиксированы в городе и 10 населённых пунктах области. "
+                "Повреждены дома, автомобили, электросети и склад."
             ),
         }
         next_day = {
-            "channel_id": 1395451700,
-            "channel": "Харьков life | Харків",
-            "username": "kharkivlife",
+            "channel_id": 1003003003,
+            "channel": "Example Regional News",
+            "username": "example_region",
             "message_id": 11,
             "date_utc": "2026-09-21T06:00:53+00:00",
             "text": (
-                "Харківщина: за добу постраждали 8 людей\n\n"
-                "Ворожих ударів зазнали Харків та 18 населених пунктів області. "
-                "Пошкоджені будинки, автомобілі, електромережі та залізнична інфраструктура."
+                "Регион: за сутки пострадали 8 человек\n\n"
+                "Повреждения зафиксированы в городе и 18 населённых пунктах области. "
+                "Повреждены дома, автомобили, электросети и железнодорожная инфраструктура."
             ),
         }
 
@@ -2877,13 +2877,13 @@ class OfflineRegressionTests(unittest.TestCase):
             ),
             (
                 "same_tusk_poll",
-                "Опрос IBRiS показал изменение рейтинга правительства Дональда Туска среди польских избирателей.",
-                "Тот же опрос IBRiS фиксирует рейтинг правительства Дональда Туска и настроения польских избирателей.",
+                "Опрос исследовательской службы показал изменение рейтинга правительства среди избирателей.",
+                "Тот же опрос исследовательской службы фиксирует рейтинг правительства и настроения избирателей.",
             ),
             (
                 "same_ft_metallurgy_story",
-                "Financial Times сообщает о кризисе металлургических предприятий Украины и сокращении производства стали.",
-                "По данным Financial Times, металлургические предприятия Украины сокращают производство стали из-за кризиса отрасли.",
+                "Деловое издание сообщает о кризисе металлургических предприятий и сокращении производства стали.",
+                "По данным делового издания, металлургические предприятия сокращают производство стали из-за кризиса отрасли.",
             ),
             (
                 "election_closure_to_count",
@@ -2897,13 +2897,13 @@ class OfflineRegressionTests(unittest.TestCase):
             ),
             (
                 "fuel_prices_kuyun",
-                "Сергей Куюн заявил, что цены дизельного топлива на украинских АЗС продолжат расти из-за дефицита.",
-                "Сергей Куюн сообщил новые данные: цены дизельного топлива на украинских АЗС выросли на фоне дефицита.",
+                "Эксперт Иван Петров заявил, что цены дизельного топлива продолжат расти из-за дефицита.",
+                "Эксперт Иван Петров сообщил новые данные: цены дизельного топлива выросли на фоне дефицита.",
             ),
             (
                 "vivaldi_shandrigolovo",
-                "Операция Вивальди в районе Шандриголово продолжается, подразделения сообщили о продвижении.",
-                "Новые данные по операции Вивальди у Шандриголово: подразделения подтвердили дальнейшее продвижение.",
+                "Операция Север в районе Приозёрска продолжается, подразделения сообщили о продвижении.",
+                "Новые данные по операции Север у Приозёрска: подразделения подтвердили дальнейшее продвижение.",
             ),
         ]
 
@@ -4397,7 +4397,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertNotIn('"recommended_ai_request"', source)
         self.assertIn('"content_use_notice"', source)
         self.assertIn('"usage_hint"', source)
-        self.assertIn("например ChatGPT", source)
+        self.assertIn("в выбранном внешнем агенте или ассистенте", source)
         self.assertIn("не отправляет", source)
         self.assertTrue(
             hasattr(collector, "build_search_digest_instruction")
@@ -4698,7 +4698,7 @@ class OfflineRegressionTests(unittest.TestCase):
             collector.EXPORT_SCHEMA_VERSION,
         )
 
-    def test_editorial_requests_do_not_depend_on_chatgpt_ui(self):
+    def test_editorial_requests_do_not_depend_on_specific_assistant_ui(self):
         requests = collector.DIGEST_REQUEST + collector.build_search_digest_instruction(
             "проверочная тема", 7, {}
         )
