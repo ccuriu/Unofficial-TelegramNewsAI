@@ -1916,7 +1916,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(collector.build_related_groups(messages), [])
 
     def test_max_profile_url_does_not_create_false_related_group(self):
-        profile_url = "https://max.ru/SolovievLive"
+        profile_url = "https://max.ru/example_channel"
         messages = [
             {
                 "channel_id": 1,
@@ -1935,17 +1935,17 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(collector.build_related_groups(messages), [])
 
     def test_other_max_profile_url_does_not_create_false_related_group(self):
-        profile_url = "https://max.ru/belarusian_silovik"
+        profile_url = "https://max.ru/example_second"
         messages = [
             {
                 "channel_id": 2,
-                "channel": "Белорусский силовик",
+                "channel": "Канал E",
                 "message_id": 11,
                 "canonical_urls": [profile_url],
             },
             {
                 "channel_id": 2,
-                "channel": "Белорусский силовик",
+                "channel": "Канал E",
                 "message_id": 21,
                 "canonical_urls": [profile_url],
             },
@@ -1954,7 +1954,7 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(collector.build_related_groups(messages), [])
 
     def test_legacy_max_profile_origin_key_does_not_create_related_group(self):
-        legacy_origin = "url:https://max.ru/SolovievLive"
+        legacy_origin = "url:https://max.ru/example_channel"
         messages = [
             {
                 "channel_id": 1,
@@ -2018,8 +2018,8 @@ class OfflineRegressionTests(unittest.TestCase):
 
     def test_recurring_service_url_in_one_channel_does_not_create_related_group(self):
         service_url = (
-            "https://249860.redirect.appmetrica.yandex.com/"
-            "?appmetrica_tracking_id=245880726195607142&referrer=reattribution%3D1"
+            "https://redirect.example.test/"
+            "?tracking_id=123&referrer=test"
         )
         messages = [
             {
@@ -2261,7 +2261,7 @@ class OfflineRegressionTests(unittest.TestCase):
         )
 
     def test_continuity_profile_url_does_not_create_context(self):
-        profile_url = "https://max.ru/SolovievLive"
+        profile_url = "https://max.ru/example_channel"
         prior = {
             "channel_id": 1,
             "channel": "Канал A",
@@ -2577,21 +2577,21 @@ class OfflineRegressionTests(unittest.TestCase):
         for message_id in range(10, 20):
             prior.append({
                 "channel_id": 1,
-                "channel": "Харьков",
-                "username": "kharkiv",
+                "channel": "Региональный канал",
+                "username": "region_channel",
                 "message_id": message_id,
                 "date_utc": f"2026-09-18T{message_id:02d}:00:00+00:00",
                 "text": (
-                    "Харків повітряна тривога негайно пройдіть в укриття"
+                    "Воздушная тревога: немедленно пройдите в укрытие"
                 ),
             })
         current = {
             "channel_id": 1,
-            "channel": "Харьков",
-            "username": "kharkiv",
+            "channel": "Региональный канал",
+            "username": "region_channel",
             "message_id": 30,
             "date_utc": "2026-09-19T08:00:00+00:00",
-            "text": "Харків повітряна тривога негайно пройдіть в укриття",
+            "text": "Воздушная тревога: немедленно пройдите в укрытие",
         }
 
         context = collector.build_continuity_context([current], prior)
@@ -2600,30 +2600,30 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_continuity_event_anchor_keeps_school_investigation_but_rejects_ai_topic_only(self):
         prior = {
             "channel_id": 1,
-            "channel": "СОЛОВЬЁВ",
+            "channel": "Канал J",
             "message_id": 10,
             "date_utc": "2026-09-20T08:00:00+00:00",
             "text": (
-                "Bloomberg: США разбомбили иранскую школу из-за ошибки искусственного интеллекта\n\n"
-                "Расследование выявило устаревшие разведданные, спутниковые снимки "
-                "и чрезмерную опору на систему Maven Smart System от Palantir."
+                "Example News: расследуется ошибочный удар по школе после сбоя аналитической системы\n\n"
+                "Расследование выявило устаревшие данные, спутниковые снимки "
+                "и чрезмерную опору на систему Northstar от Orion Labs."
             ),
         }
         same_story = {
             "channel_id": 2,
-            "channel": "Милитарист",
+            "channel": "Канал K",
             "message_id": 20,
             "date_utc": "2026-09-21T10:12:02+00:00",
             "text": (
-                "На прошедшей неделе Пентагон почти завершил расследование причин "
-                "удара по детской школе в иранском Минабе. Bloomberg сообщает, "
-                "что военные слишком сильно полагались на Maven Smart System "
-                "компании Palantir и устаревшие разведывательные данные."
+                "На прошедшей неделе ведомство почти завершило расследование причин "
+                "ошибочного удара по школе. Example News сообщает, "
+                "что специалисты слишком сильно полагались на систему Northstar "
+                "компании Orion Labs и устаревшие данные."
             ),
         }
         data_center = {
             "channel_id": 3,
-            "channel": "Милитарист",
+            "channel": "Канал K",
             "message_id": 30,
             "date_utc": "2026-09-21T11:58:45+00:00",
             "text": (
@@ -2662,14 +2662,14 @@ class OfflineRegressionTests(unittest.TestCase):
         self.assertEqual(refs[20]["match_strength"], "candidate")
         self.assertNotIn(30, refs)
 
-    def test_continuity_event_anchor_separates_novovolynsk_from_inter_kyiv(self):
+    def test_continuity_event_anchor_separates_same_city_story_from_unrelated_event(self):
         prior = {
             "channel_id": 1,
-            "channel": "XUA",
+            "channel": "Канал H",
             "message_id": 10,
             "date_utc": "2026-09-20T11:57:07+00:00",
             "text": (
-                "В Нововолынске очевидцы сняли момент, как мужчину силой "
+                "В Приозёрске очевидцы сняли момент, как мужчину силой "
                 "помещают в микроавтобус\n\n"
                 "Несколько человек в военной форме удерживают мужчину и "
                 "заталкивают его в микроавтобус."
@@ -2681,19 +2681,19 @@ class OfflineRegressionTests(unittest.TestCase):
             "message_id": 20,
             "date_utc": "2026-09-21T08:00:00+00:00",
             "text": (
-                "В Нововолынске мужчина пытался избежать принудительной посадки "
+                "В Приозёрске мужчина пытался избежать принудительной посадки "
                 "в микроавтобус, очевидцы вмешались в конфликт\n\n"
                 "На кадрах люди в военной форме удерживают мужчину."
             ),
         }
         inter_kyiv = {
             "channel_id": 3,
-            "channel": "Сплетница",
+            "channel": "Канал I",
             "message_id": 30,
             "date_utc": "2026-09-21T09:00:00+00:00",
             "text": (
-                "Мобилизационного конфликта не избежал представитель СМИ.\n\n"
-                "Сотрудника телеканала Интер задержали возле студии в Киеве. "
+                "Похожий конфликт произошёл в другом городе.\n\n"
+                "Сотрудника организации задержали возле офиса. "
                 "На видео люди в военной форме удерживают мужчину и заталкивают "
                 "его в машину."
             ),
@@ -2744,25 +2744,25 @@ class OfflineRegressionTests(unittest.TestCase):
     def test_continuity_event_anchor_keeps_conversion_center_reprints_but_rejects_other_crypto_fraud(self):
         prior = {
             "channel_id": 1,
-            "channel": "INSIDER",
+            "channel": "Канал F",
             "message_id": 10,
             "date_utc": "2026-09-20T13:28:39+00:00",
             "text": (
                 "Разоблачён конвертационный центр, через который ежемесячно "
-                "проходило около 500 млн грн, сообщили Офис Генпрокурора и БЭБ.\n\n"
-                "Общий объем финансовых операций составил 23,5 млрд грн. "
+                "проходило около 500 млн условных единиц, сообщили следователи.\n\n"
+                "Общий объем финансовых операций составил 23,5 млрд условных единиц. "
                 "Средства выводились через криптовалюту, участникам сообщили о подозрении."
             ),
         }
         reprint = {
             "channel_id": 2,
-            "channel": "Шептун",
+            "channel": "Канал G",
             "message_id": 20,
             "date_utc": "2026-09-21T08:00:00+00:00",
             "text": (
-                "Офис Генпрокурора и БЭБ разоблачили конвертационный центр, "
-                "через который ежемесячно проходило около 500 млн грн.\n\n"
-                "Объем финансовых операций достиг 23,5 млрд грн, средства "
+                "Следователи разоблачили конвертационный центр, "
+                "через который ежемесячно проходило около 500 млн условных единиц.\n\n"
+                "Объем финансовых операций достиг 23,5 млрд условных единиц, средства "
                 "выводились через криптовалюту."
             ),
         }
@@ -3887,14 +3887,14 @@ class OfflineRegressionTests(unittest.TestCase):
             1,
             1,
             20,
-            "Orion council approved harbor budget, сообщает Frank Media "
+            "Orion council approved harbor budget, сообщает Example Business "
             "со ссылкой на источник.",
         )
         second = self._candidate_message(
             1,
             2,
             10,
-            "Lumen holding appointed finance director, сообщает Frank Media "
+            "Lumen holding appointed finance director, сообщает Example Business "
             "со ссылкой на источник.",
         )
 
@@ -3907,7 +3907,7 @@ class OfflineRegressionTests(unittest.TestCase):
             1,
             1,
             30,
-            "Budget talks face political collapse in Lumen — Financial Times\n\n"
+            "Budget talks face political collapse in Lumen — Example Business\n\n"
             "The possibility of agreement is significantly restricted, "
             "the report writes.",
         )
@@ -3922,7 +3922,7 @@ class OfflineRegressionTests(unittest.TestCase):
             3,
             3,
             10,
-            "Diesel export restriction remains unlikely in Orion — Financial Times\n\n"
+            "Diesel export restriction remains unlikely in Orion — Example Business\n\n"
             "The possibility of action is significantly restricted, "
             "the report writes.",
         )
@@ -4192,9 +4192,9 @@ class OfflineRegressionTests(unittest.TestCase):
                     "message_id": 20,
                     "message_key": "2:20",
                     "date_local": "2026-09-22T12:00:00+03:00",
-                    "channel": "Український канал",
-                    "username": "ua_channel",
-                    "telegram_url": "https://t.me/ua_channel/20",
+                    "channel": "Многоязычный канал",
+                    "username": "multilingual_channel",
+                    "telegram_url": "https://t.me/multilingual_channel/20",
                     "text": "Змістовний підпис до відео.",
                     "media": {"type": "video"},
                 },
@@ -4381,7 +4381,7 @@ class OfflineRegressionTests(unittest.TestCase):
             "telegram_url": "https://t.me/test/1",
             "text": "Текст",
             "external_urls": [
-                "https://249860.redirect.appmetrica.yandex.com/?appmetrica_tracking_id=123",
+                "https://redirect.example.test/?tracking_id=123",
                 "https://example.com/news/concrete-article-2026?utm_source=telegram",
             ],
         }
