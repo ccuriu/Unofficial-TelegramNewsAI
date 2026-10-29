@@ -8,7 +8,7 @@
 
 Это новое решение владельца имеет приоритет над более ранним правилом «STOP после одной обычной диагностики» **только для сопутствующих исправляемых ошибок в своей области**. Все действующие профильные запреты и исключительное владение релизом сохраняются.
 
-[Полный канон URIU](https://github.com/ccuriu/uriu-control-bridge/blob/policy/owner-executor-autonomy-canon-20261030/docs/EXECUTOR_AUTONOMY_CANON.md) · [Решение владельца](https://github.com/ccuriu/uriu-control-bridge/issues/684#issuecomment-6509703240).
+[Полный канон URIU](https://github.com/ccuriu/uriu-control-bridge/blob/main/docs/EXECUTOR_AUTONOMY_CANON.md) · [Решение владельца](https://github.com/ccuriu/uriu-control-bridge/issues/684#issuecomment-6509703240).
 
 ## Правила конкретного проекта
 
